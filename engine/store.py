@@ -54,6 +54,20 @@ create table if not exists media (
   status text not null, data text, error text, made_from text, export_status text, export_error text, export_file text, created_at text not null,
   unique (section_id, kind)
 );
+create table if not exists students (id text primary key, name text not null, email text, created_at text not null);
+create table if not exists assignments (
+  id text primary key, title text not null, kind text not null, instructions text, due text, minutes integer, questions text not null,
+  source_name text, source_check text, read_by text, status text not null default 'draft', error text, created_at text not null
+);
+create table if not exists submissions (
+  id text primary key, assignment_id text not null references assignments(id) on delete cascade, student_id text not null, student_name text not null,
+  status text not null default 'working', answers text not null default '{}', process text not null default '{}', started_at text, handed_in_at text,
+  checked text, check_status text, marks text, comment text, returned_at text, unique (assignment_id, student_id)
+);
+create table if not exists meetings (
+  id text primary key, title text not null, who text not null, start text not null, minutes integer not null default 30, note text,
+  status text not null default 'asked', asked_by text not null default 'student', created_at text not null
+);
 create table if not exists uploads (id text primary key, name text not null, text text not null, read_by text not null, created_at text not null);
 create table if not exists prefs (key text primary key, value text not null);
 """

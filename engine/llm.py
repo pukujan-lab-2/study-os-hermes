@@ -54,15 +54,30 @@ def text(system: str, user: str, *, max_tokens: int = 7000, purpose: str = "less
     raise ModelError(_explain(err))
 
 
+def strict(schema):
+    """Every object says it has no other fields: some providers (Claude) refuse a schema that doesn't."""
+    if isinstance(schema, dict):
+        out = {k: strict(v) for k, v in schema.items()}
+        if out.get("type") == "object":
+            out.setdefault("additionalProperties", False)
+        return out
+    return [strict(x) for x in schema] if isinstance(schema, list) else schema
+
+
 def data(system: str, user: str, schema: dict, *, max_tokens: int = 7000, purpose: str = "quiz") -> dict:
     """A JSON reply that fits `schema`. One retry tells the model what was wrong."""
     note = ""
     for attempt in range(3):
         try:
-            r = _get().complete_structured(
-                instructions=system + note, input=[{"type": "text", "text": user}], json_schema=schema, max_tokens=max_tokens, timeout=240, purpose=f"study-os-solo.{purpose}"
-            )
-            parsed = r.parsed if r.parsed is not None else first_json(r.text or "")
+            if attempt < 2:
+                r = _get().complete_structured(
+                    instructions=system + note, input=[{"type": "text", "text": user}], json_schema=strict(schema), max_tokens=max_tokens, timeout=240, purpose=f"study-os-solo.{purpose}"
+                )
+                parsed = r.parsed if r.parsed is not None else first_json(r.text or "")
+            else:  # a provider without structured replies still writes JSON when asked
+                ask = f"{system}\n\nReply with only a JSON object that fits this schema:\n{json.dumps(schema)}{note}"
+                r = _get().complete([{"role": "system", "content": ask}, {"role": "user", "content": user}], max_tokens=max_tokens, timeout=240, purpose=f"study-os-solo.{purpose}")
+                parsed = first_json(r.text or "")
             if isinstance(parsed, dict):
                 missing = [k for k in schema.get("required", []) if k not in parsed]
                 if not missing:

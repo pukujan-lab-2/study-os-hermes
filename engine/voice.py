@@ -91,13 +91,14 @@ def say(text: str, who: str = "a") -> bytes | None:
         f.touch()
         return f.read_bytes()
     wav = None
-    if modal:
+    if modal and services.modal_warm():  # asleep: this computer's voice now, Modal's once it's up
         try:
             wav = services.modal_tts(text, kind.split(":", 1)[1])
         except services.ServiceError:
             wav = None  # asleep or out of credit: this computer's voice carries on
     if wav is None:
         wav = computer(text, who)
+        f = f.with_name(hashlib.sha256(f"computer:{who}|{text}".encode()).hexdigest()[:32] + ".wav")
     if wav:
         f.write_bytes(wav)
         _prune(f.parent)

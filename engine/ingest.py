@@ -77,6 +77,31 @@ def _docx(data: bytes) -> str:
     return "\n\n".join(out)[:MAX_CHARS]
 
 
+def photo(name: str, data: bytes) -> str:
+    """Handwriting or a worksheet in a photo, read by Reducto."""
+    kind = "image/png" if data[:8] == b"\x89PNG\r\n\x1a\n" else "image/jpeg" if data[:3] == b"\xff\xd8\xff" else "application/pdf" if data[:5] == b"%PDF-" else None
+    if not kind:
+        raise Problem("Use a PNG or JPEG photo, or a PDF scan.")
+    if not services.status()["reducto"]:
+        raise Problem("Reading handwriting needs a Reducto key in Settings, Plugins.")
+    text = services.reducto(data, name, kind)
+    if len(text.strip()) < 3:
+        raise Problem("No writing was found in that photo. Try a sharper one, closer up.")
+    return text.strip()[:MAX_CHARS]
+
+
+def check(uid: str) -> dict:
+    """Who wrote the source, by Pangram's reading of a good sample of it."""
+    text = upload(uid)["text"]
+    return check_text(text)
+
+
+def check_text(text: str) -> dict:
+    plain = re.sub(r"[#*_|>`]", "", text)
+    start = min(400, len(plain) // 20)  # past a title page
+    return services.pangram(re.sub(r"\s+", " ", plain[start : start + 7000]).strip())
+
+
 def save_upload(name: str, data: bytes) -> dict:
     text, by = read(name, data)
     if len(text) < 200:

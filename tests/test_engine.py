@@ -15,7 +15,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from engine import courses, essay, film, ingest, llm, mastery, media, quiz, services, store, tutor, voice  # noqa: E402
+from engine import classroom, courses, essay, film, ingest, llm, mastery, media, quiz, services, store, tutor, voice  # noqa: E402
 
 QUIZ = {
     "objectives": [
@@ -71,7 +71,13 @@ class FakeModel:
         elif "scenes" in req:
             out = {"title": "Film <b>", "scenes": [{"kind": "title", "heading": "Osmosis & you", "say": "Water moves.", "items": [{"label": "A short film"}]}, {"kind": "steps", "heading": "How", "say": "First this then that.", "items": [{"label": "One", "note": "a"}, {"label": "Two"}]}, {"kind": "compare", "heading": "Empty one", "say": "Nothing to compare here."}, {"kind": "question", "heading": "Why?", "say": "Think about it."}]}
         elif req == ["say"]:
-            out = {"say": "What do you think moves?", "quiz": False, "visual": QUIZ["visual"]}
+            out = {"say": "What do you think moves?", "quiz": False, "draw": "a cell"}
+        elif "marks" in req and "title" in req:
+            out = {"title": "Cell", "marks": [{"kind": "circle", "x": 100, "y": 100, "r": 9999}, {"kind": "arrow", "x": 1, "y": 1, "x2": 50, "y2": 50}, {"kind": "text", "x": 5, "y": 5, "text": "Cell"}, {"kind": "path", "d": "M0 0 <script>"}, {"kind": "blob"}]}
+        elif "instructions" in req:
+            out = {"title": "Mock exam", "instructions": "Take your time.", "questions": [{"kind": "choice", "prompt": "Pick", "options": ["a", "b", "c"], "answer": "b", "points": 2, "guide": ""}, {"kind": "choice", "prompt": "Broken", "options": ["a", "b", "c"], "answer": "z", "points": 2, "guide": ""}, {"kind": "essay", "prompt": "Explain", "points": 10, "guide": "water"}]}
+        elif req == ["marks"]:
+            out = {"marks": [{"number": 2, "points": 1, "why": "ok"}, {"number": 3, "points": 99, "why": "great"}]}
         elif "strong" in req:
             out = {"summary": "s", "strong": ["a"], "improve": [{"where": "w", "why": "y"}], "questions": ["q"]}
         else:
@@ -309,7 +315,7 @@ class Services(Case):
         self.assertNotIn("Authorization", by_path["/big"])
 
     def test_pangram_waits_for_its_verdict(self):
-        self.assertEqual(services.pangram("some words"), {"label": "AI", "ai": 0.9, "assisted": 0.1, "human": 0.0})
+        self.assertEqual(services.pangram("some words"), {"label": "AI", "ai": 0.9, "assisted": 0.1, "human": 0.0, "parts": []})
         self.assertEqual({k.lower(): v for k, v in self.seen[0][1].items()}["x-api-key"], "pk")
 
     def test_modal_sound_becomes_a_wav(self):
@@ -388,7 +394,11 @@ class Media(Case):
     def test_talking(self):
         s = self.made()["list"][0]
         t = tutor.turn(s["id"], "", [])
-        self.assertEqual((t["say"], t["visual"]["kind"]), ("What do you think moves?", "flow"))
+        self.assertEqual((t["say"], t["draw"]), ("What do you think moves?", "a cell"))
+        k = tutor.sketch(s["id"], t["draw"])["marks"]
+        self.assertEqual([m["kind"] for m in k], ["circle", "arrow", "text"])  # the script path and the bad ones are gone
+        self.assertEqual(k[0]["r"], 280)
+        self.assertTrue(llm.strict(tutor.SKETCH_SCHEMA)["properties"]["marks"]["items"]["additionalProperties"] is False)
         with self.assertRaises(services.ServiceError):
             voice.hear(b"not a wav")
 
@@ -406,6 +416,63 @@ class Media(Case):
         self.assertIn("nous/welcome", llm._explain(Exception("Error code: 429 - {'message': \"This model isn't available on the free tier.\", 'reason': 'model_not_free', 'alternates': ['nous/welcome']}")))
 
 
+class Classroom(Case):
+    def test_from_a_document_to_marked_work_without_leaking_answers(self):
+        aid = classroom.make(kind="exam", name="cells.pdf", text="Cells take in water. " * 30, read_by="Reducto", due="2026-11-30T17:00", minutes=30)
+        end = time.time() + 5
+        while (a := classroom.desk()["assignments"][0])["status"] == "making" and time.time() < end:
+            time.sleep(0.02)
+        self.assertEqual([q["kind"] for q in a["questions"]], ["choice", "short", "essay"])
+        self.assertEqual(classroom.work()["work"], [])  # students don't see drafts
+        classroom.publish(aid, None, None)
+        page = (classroom.folder() / "set" / f"{aid}.studyos.json").read_text()
+        self.assertNotIn("guide", page)
+        self.assertNotIn('"answer"', page)
+        with self.assertRaises(courses.Problem):
+            classroom.save(aid, {}, {}, False)
+        store.set_prefs({"student_id": "s1", "student_name": "Maya", "student_email": "maya@example.com"})
+        q = classroom.work()["work"][0]["questions"]
+        self.assertNotIn("guide", q[0])
+        ans = {q[0]["id"]: {"text": "b"}, q[2]["id"]: {"text": "Water goes in. " * 30, "by": "photo"}}
+        classroom.save(aid, ans, {"typed": 10, "pasted": 400, "line": [1, 2], "evil": "x"}, True)
+        classroom.save(aid, {}, {}, False)  # nothing changes once it's handed in
+        d = classroom.desk()
+        while d["submissions"][0]["check_status"] != "done" and time.time() < end + 5:
+            time.sleep(0.02)
+            d = classroom.desk()
+        s = d["submissions"][0]
+        self.assertEqual((s["student_name"], s["process"]["pasted"], "evil" in s["process"]), ("Maya", 400, False))
+        self.assertEqual([s["marks"][x["id"]]["points"] for x in q], [2, 1, 10])
+        self.assertEqual(classroom.work()["work"][0]["mine"]["marks"], {})  # not before it's returned
+        classroom.give_back(s["id"], s["marks"], "Nice")
+        self.assertEqual(classroom.work()["work"][0]["mine"]["comment"], "Nice")
+
+    def test_work_crosses_computers_through_a_folder(self):
+        aid = classroom.make(kind="assignment", name="x", text="Cells take in water. " * 30, read_by="pasted", due=None, minutes=None)
+        end = time.time() + 5
+        while classroom.desk()["assignments"][0]["status"] == "making" and time.time() < end:
+            time.sleep(0.02)
+        classroom.publish(aid, None, None)
+        shared = str(classroom.folder())
+        os.environ["STUDYOS_SOLO_DB"] = os.path.join(self.dir.name, "student.db")
+        store.set_prefs({"student_id": "s2", "student_name": "Leo", "class_folder": shared})
+        self.assertEqual(classroom.work()["work"][0]["title"], "Mock exam")
+        classroom.save(aid, {classroom.work()["work"][0]["questions"][0]["id"]: {"text": "a"}}, {}, True)
+        os.environ["STUDYOS_SOLO_DB"] = os.path.join(self.dir.name, "t.db")
+        (Path(shared) / "handed-in" / "bad.studyos.json").write_text("{")
+        self.assertEqual([s["student_name"] for s in classroom.desk()["submissions"]], ["Leo"])
+
+    def test_meetings_open_google_calendar_filled_in(self):
+        mid = classroom.meet("Office hours", ["maya@example.com", "Leo"], "2026-11-24T15:00:00-05:00", 30, "Bring questions", "student", False)
+        link = classroom.calendar_link(mid)
+        self.assertIn("20261124T200000Z/20261124T203000Z", link)
+        self.assertIn("maya%40example.com", link)
+        self.assertNotIn("Leo", link)
+        with self.assertRaises(courses.Problem):
+            classroom.meet("x", [], "soon", 30, "", "student", False)
+        self.assertTrue(classroom.mail_link(["a@b.c"], "Hi", "there & you").endswith("body=there%20%26%20you"))
+
+
 class Tools(Case):
     def setUp(self):
         super().setUp()
@@ -416,7 +483,7 @@ class Tools(Case):
         pkg = types.ModuleType("solo")
         pkg.__path__ = [str(root)]
         sys.modules["solo"] = pkg
-        for n in ("engine", "engine.store", "engine.courses", "engine.quiz", "engine.llm", "engine.ingest", "engine.services", "engine.media", "engine.tutor", "engine.voice", "engine.essay", "engine.film"):
+        for n in ("engine", "engine.store", "engine.courses", "engine.quiz", "engine.llm", "engine.ingest", "engine.services", "engine.media", "engine.tutor", "engine.voice", "engine.essay", "engine.film", "engine.classroom"):
             sys.modules[f"solo.{n}"] = sys.modules[n]
         self.tools = importlib.import_module("solo.study_tools")
 

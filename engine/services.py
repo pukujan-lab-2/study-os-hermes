@@ -84,14 +84,14 @@ def _json(method: str, url: str, headers: dict, body=None, timeout: float = 120)
 
 # ---- Reducto: PDFs (and scans) to Markdown -----------------------------------------------------------------
 
-def reducto(data: bytes, name: str) -> str:
+def reducto(data: bytes, name: str, mime: str = "application/pdf") -> str:
     key = secret("REDUCTO_API_KEY")
     if not key:
         raise ServiceError("No Reducto key.")
     base, auth = _safe(setting("reducto_url", REDUCTO)), {"Authorization": f"Bearer {key}"}
     mark = uuid.uuid4().hex
-    safe_name = "".join(ch if ch.isalnum() or ch in "._-" else "_" for ch in name)[:80] or "document.pdf"
-    form = b"".join([f'--{mark}\r\nContent-Disposition: form-data; name="file"; filename="{safe_name}"\r\nContent-Type: application/pdf\r\n\r\n'.encode(), data, f"\r\n--{mark}--\r\n".encode()])
+    safe_name = "".join(ch if ch.isalnum() or ch in "._-" else "_" for ch in name)[:80] or "document"
+    form = b"".join([f'--{mark}\r\nContent-Disposition: form-data; name="file"; filename="{safe_name}"\r\nContent-Type: {mime}\r\n\r\n'.encode(), data, f"\r\n--{mark}--\r\n".encode()])
     raw, _ = _http("POST", f"{base}/upload", headers={**auth, "Content-Type": f"multipart/form-data; boundary={mark}"}, body=form)
     file_id = json.loads(raw).get("file_id")
     if not file_id:
@@ -105,6 +105,16 @@ def reducto(data: bytes, name: str) -> str:
 
 
 # ---- Pangram: how a text reads -------------------------------------------------------------------------------
+
+def _parts(t: dict) -> list[dict]:
+    """Pangram's reading of each stretch of text, for highlighting."""
+    out = []
+    for w in (t.get("windows") or [])[:200]:
+        label = str(w.get("label") or "")
+        kind = "human" if "human" in label.lower() else "assisted" if "assist" in label.lower() or "light" in label.lower() else "ai"
+        out.append({"text": str(w.get("text") or ""), "kind": kind, "sure": str(w.get("confidence") or ""), "humanized": bool(w.get("is_humanized"))})
+    return out
+
 
 def pangram(text: str) -> dict:
     """{label, ai, assisted, human}: shares from 0 to 1. A signal, never proof."""
@@ -121,13 +131,30 @@ def pangram(text: str) -> dict:
         t = _json("GET", f"{base}/task/{task}", h, timeout=20)
     ai, assisted = float(t.get("fraction_ai") or 0), float(t.get("fraction_ai_assisted") or 0)
     human = float(t["fraction_human"]) if t.get("fraction_human") is not None else max(0.0, 1 - ai - assisted)
-    return {"label": t.get("prediction_short") or ("Human" if human >= 0.5 else "AI"), "ai": round(ai, 3), "assisted": round(assisted, 3), "human": round(human, 3)}
+    return {"label": t.get("prediction_short") or ("Human" if human >= 0.5 else "AI"), "ai": round(ai, 3), "assisted": round(assisted, 3), "human": round(human, 3), "parts": _parts(t)}
 
 
 # ---- Modal: a voice and an ear on your own account (voice/modal_speech.py) -------------------------------------
 
 def _modal() -> tuple[str, dict]:
     return _safe(setting("modal_url")), {"Authorization": f"Bearer {secret('MODAL_SPEECH_TOKEN')}"}
+
+
+_warm_until = 0.0
+
+
+def modal_warm() -> bool:
+    """Whether Modal answers right now. Asking also wakes it, so it is ready for the next line."""
+    global _warm_until
+    if time.time() < _warm_until:
+        return True
+    url, auth = _modal()
+    try:
+        _http("GET", f"{url}/health", headers=auth, timeout=2.5)
+    except ServiceError:
+        return False
+    _warm_until = time.time() + 60
+    return True
 
 
 def modal_tts(text: str, voice: str) -> bytes:
