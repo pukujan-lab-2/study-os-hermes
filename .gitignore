@@ -8,3 +8,4 @@ web/static/app.js
 web/seed/voice/
 web/seed/class/
 web/seed/data.db*
+web/docker-compose.yml
