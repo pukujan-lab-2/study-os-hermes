@@ -311,6 +311,29 @@ class Services(Case):
             services._http("POST", f"http://127.0.0.1:{self.http.server_port}/redirect", headers={"Authorization": "Bearer rk"}, body=b"x")
 
 
+class Tools(Case):
+    def setUp(self):
+        super().setUp()
+        import importlib
+        import types
+
+        root = Path(__file__).resolve().parent.parent
+        pkg = types.ModuleType("solo")
+        pkg.__path__ = [str(root)]
+        sys.modules["solo"] = pkg
+        for n in ("engine", "engine.store", "engine.courses", "engine.quiz", "engine.llm", "engine.ingest", "engine.services"):
+            sys.modules[f"solo.{n}"] = sys.modules[n]
+        self.tools = importlib.import_module("solo.study_tools")
+
+    def test_a_course_can_be_named_and_a_wrong_name_lists_them(self):
+        c = self.made()
+        q = json.loads(self.tools.question({"course_id": "OSMOSIS"}))
+        self.assertEqual(q["course_id"], c["id"])
+        self.assertIn("Osmosis", json.loads(self.tools.question({"course_id": "physics"}))["error"])
+        self.assertEqual(json.loads(self.tools.lesson({"course_id": c["id"], "section": 9}))["error"], "That course has 3 sections.")
+        self.assertIn("error", json.loads(self.tools.answer({"question_id": "nope"})))
+
+
 class Files(Case):
     def test_word_documents_and_text(self):
         buf = io.BytesIO()

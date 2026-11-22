@@ -22,7 +22,7 @@ LESSON = _tool("study_lesson", "Read one section of a course, to teach or discus
 QUESTION = _tool(
     "study_question",
     "Get the next quiz question, picked for what the learner knows least or is about to forget. Ask it in your own message and wait for their answer; never answer it yourself.",
-    {"course_id": {**_S, "description": "Leave out to review every course."}, "due_only": {"type": "boolean", "description": "Only what is due for review."}, "asked": {"type": "array", "items": _S, "description": "Ids already asked in this chat."}},
+    {"course_id": {**_S, "description": "Its id or title. Leave out to review every course."}, "due_only": {"type": "boolean", "description": "Only what is due for review."}, "asked": {"type": "array", "items": _S, "description": "Ids already asked in this chat."}},
 )
 ANSWER = _tool(
     "study_answer",

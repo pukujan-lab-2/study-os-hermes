@@ -18,8 +18,19 @@ def _tool(fn):
     return handler
 
 
+def _course(x):
+    """A course id from an id or a title (models often pass the title)."""
+    want = str(x or "").strip().lower()
+    all_ = courses.list_courses()
+    hit = [c for c in all_ if c["id"] == want or c["title"].lower() == want] or [c for c in all_ if want and want in c["title"].lower()]
+    if len(hit) != 1:
+        names = ", ".join(f"{c['title']} ({c['id']})" for c in (hit or all_)[:12]) or "none yet"
+        raise courses.Problem(f"Which course? Yours: {names}.")
+    return hit[0]["id"]
+
+
 def _section(args):
-    c = courses.get(str(args.get("course_id", "")))
+    c = courses.get(_course(args.get("course_id")))
     n = int(args.get("section") or 1)
     if not 1 <= n <= len(c["list"]):
         raise courses.Problem(f"That course has {len(c['list'])} sections.")
@@ -52,7 +63,7 @@ def lesson(args):
 
 @_tool
 def question(args):
-    q = quiz.next_question(course_id=args.get("course_id") or None, asked=args.get("asked") or [], due_only=bool(args.get("due_only")))
+    q = quiz.next_question(course_id=_course(args["course_id"]) if args.get("course_id") else None, asked=args.get("asked") or [], due_only=bool(args.get("due_only")))
     if not q:
         return {"message": "Nothing left to ask here right now."}
     q["options"] = [f"{i + 1}. {o}" for i, o in enumerate(q["options"])] if q["options"] else None
