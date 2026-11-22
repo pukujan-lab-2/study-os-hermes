@@ -7,12 +7,14 @@ Learn anything inside [Hermes](https://github.com/NousResearch/hermes-agent), on
 ## Install
 
 ```bash
-hermes plugins install pukujan-lab-2/study-os-hermes --enable
+hermes plugins install pukujan-lab-2/study-os-hermes
+hermes plugins enable study-os-solo
+hermes gateway restart
 ```
 
 **Let your Hermes do it:** tell it *"Install the plugin pukujan-lab-2/study-os-hermes and set it up for me."* It comes with a `setup` skill that walks through the rest.
 
-Then, in Hermes Desktop, open **Capabilities → Plugins**, choose **Rescan**, and turn on **Study OS Solo**. **Study OS** and **Study OS Teacher** appear in the sidebar. In chat, just ask: "Make me a course on how vaccines work", "Quiz me on what's due", "Teach me section 2".
+Then, in Hermes Desktop, open **Capabilities → Plugins**, choose **Rescan**, and turn on **Study OS Solo** (Hermes keeps a plugin's pages off until you do). **Study OS** and **Study OS Teacher** appear in the sidebar. In chat, just ask: "Make me a course on how vaccines work", "Quiz me on what's due", "Teach me section 2".
 
 ## What it does
 
@@ -54,7 +56,7 @@ Lessons made from a topic are written from what your model knows, with no source
 
 ## Try it in a browser, or host it
 
-[hackathon.design-bakery.com](https://hackathon.design-bakery.com) runs the same engine and page with no sign-in. Each device gets its own database, known by a random cookie; a teacher opens a class with a code or QR and students join from their own devices. Spaces are deleted after three quiet days, and each device has a daily limit. To host your own, see `web/` (`server.py`, `docker-compose.yml`); keys stay in an env file on your server, and `web/try_devices.py` checks a running copy with several devices at once.
+[hackathon.design-bakery.com](https://hackathon.design-bakery.com) runs the same engine and page with no sign-in. Each device gets its own database, known by a random cookie; a teacher opens a class with a code or QR and students join from their own devices. Spaces are deleted after three quiet days, and each device has a daily limit. To host your own, see `web/` (`server.py`, `Dockerfile`); keys stay in an env file on your server, and `web/try_devices.py` checks a running copy with several devices at once.
 
 ## How it's built
 
