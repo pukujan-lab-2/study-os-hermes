@@ -1,0 +1,106 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Study OS for Hermes</title><meta name="viewport" content="width=device-width">
+<style>
+@font-face{font-family:Inter;font-weight:100 900;src:url(fonts/inter.woff2) format("woff2")}
+@font-face{font-family:Mono;font-weight:400;src:url(fonts/mono.woff2) format("woff2")}
+*{margin:0;box-sizing:border-box}html,body{height:100%;background:#121212;overflow:hidden}
+body{font-family:Inter,"Helvetica Neue",Arial,sans-serif;color:#121212}
+#stage{position:absolute;left:50%;top:50%;width:1920px;height:1080px;transform-origin:0 0}
+#stage>section{position:absolute;inset:0;background:#faf8f3;padding:90px 110px;visibility:hidden;opacity:0;transition:opacity .25s;overflow:hidden}
+#stage>section.on{visibility:visible;opacity:1}#stage>section:not(.on) *{animation:none!important}
+.blue{background:#2f3cdc!important;color:#fff}.yellow{background:#ffc93c!important}.pink{background:#f39ac3!important}.green{background:#1a7748!important;color:#fff}.orange{background:#f26b2e!important}
+h1{font-size:190px;line-height:.86;letter-spacing:-.055em;font-weight:800;text-transform:uppercase;text-wrap:balance}
+h2{font-size:84px;line-height:.92;letter-spacing:-.05em;font-weight:800;text-transform:uppercase}
+h1 em,h2 em{font-style:normal;font-weight:400;color:#d7322a}.blue em{color:#ffd34d}.green em{color:#ffd34d}.pink em,.yellow em,.orange em{color:#121212}
+.m{font-family:Mono,monospace;font-size:24px;letter-spacing:.05em;text-transform:uppercase}
+.rise{animation:rise .6s cubic-bezier(.2,.7,.2,1) both;animation-delay:calc(var(--i,0)*110ms)}@keyframes rise{from{opacity:0;transform:translateY(30px)}}
+.clip{position:absolute;right:90px;top:90px;width:1240px;height:775px;background:#faf8f3;border:3px solid #121212;border-radius:14px;box-shadow:16px 16px 0 #121212;object-fit:cover}
+.side{position:absolute;left:90px;top:110px;width:450px;display:flex;flex-direction:column;gap:34px}
+.tag{display:inline-block;align-self:flex-start;border:3px solid #121212;border-radius:99px;padding:9px 24px;background:#fff;color:#121212;font-weight:700;font-size:28px;box-shadow:5px 5px 0 #121212}
+.big{font-size:40px;line-height:1.16;letter-spacing:-.02em;font-weight:600}
+.foot{position:absolute;left:90px;right:90px;bottom:62px;display:flex;justify-content:space-between;font-family:Mono,monospace;font-size:22px}
+.row{display:flex;gap:34px;margin-top:70px}.card{flex:1;background:#fff;color:#121212;border:3px solid #121212;border-radius:26px;box-shadow:12px 12px 0 #121212;padding:40px}.card b{display:block;font-size:52px;letter-spacing:-.04em;line-height:1;margin-bottom:18px}.card p{font-size:29px;line-height:1.3}
+.cmd{margin-top:60px;display:inline-block;background:#121212;color:#fff;border-radius:18px;padding:26px 38px;font-family:Mono,monospace;font-size:33px}
+.vs{display:grid;grid-template-columns:1fr 1fr;gap:60px;margin-top:70px}.vs .card b{font-size:150px}
+.bar{height:34px;border-radius:99px;border:3px solid #121212;margin:22px 0}
+.foot a{color:inherit}aside{display:none}#notes{position:fixed;left:0;right:0;bottom:0;padding:16px 26px;background:rgba(0,0,0,.9);color:#faf8f3;font:20px/1.45 Inter,Arial;display:none}#notes.show{display:block}
+#strip{position:absolute;left:0;right:0;bottom:0;height:96px;display:grid;grid-template-columns:repeat(4,1fr);border-top:4px solid #121212;background:#faf8f3;z-index:20}
+#strip div{display:flex;align-items:center;justify-content:center;gap:14px;border-left:4px solid #121212;font-size:33px;font-weight:800;letter-spacing:-.04em;text-transform:uppercase;color:#b9b5a9;transition:background .25s,color .25s}#strip div:first-child{border:0}#strip span{font-family:Mono,monospace;font-weight:400;font-size:21px;letter-spacing:.02em;text-transform:lowercase}
+#strip .on{color:#121212}#strip .on[data-s=reducto]{background:#ffc93c}#strip .on[data-s=pangram]{background:#f39ac3}#strip .on[data-s=hermes]{background:#8f9cff}#strip .on[data-s=modal]{background:#1a7748;color:#fff}
+#stage .foot{bottom:128px}#stage .clip{top:70px}#stage .side{top:90px}
+.ab{display:grid;grid-template-columns:1fr 1fr;gap:56px;margin-top:56px}.abc{background:#fff;border:4px solid #121212;border-radius:26px;box-shadow:12px 12px 0 #121212;padding:36px 40px;min-height:600px}.abc p{font-size:33px;line-height:1.42;letter-spacing:-.015em;font-weight:500;margin-top:22px}.abc p span{transition:background .4s;-webkit-box-decoration-break:clone;box-decoration-break:clone}.abtop{display:flex;align-items:center;gap:20px;height:72px}.abtop i{font-style:normal;display:grid;place-items:center;width:72px;height:72px;border-radius:50%;background:#121212;color:#fff;font-weight:800;font-size:36px}.abtop b{font-size:32px;letter-spacing:-.03em;opacity:0}.abtop .m{margin-left:auto;opacity:0;border:3px solid #121212;border-radius:99px;padding:8px 18px}.shown .abtop b,.shown .abtop .m{opacity:1;transition:opacity .3s}.shown .ai p span{background:#f7c9c6;box-shadow:inset 0 -3px 0 #d7322a}.shown .me p span{background:#cfe9d9;box-shadow:inset 0 -3px 0 #1a7748}.shown .ai .m{background:#d7322a;color:#fff}.shown .me .m{background:#1a7748;color:#fff}
+.word{animation:none}.word.pop{animation:pop .28s cubic-bezier(.2,1.4,.4,1)}@keyframes pop{from{transform:scale(.7) rotate(-4deg)}}
+#clock{position:fixed;right:20px;top:16px;font:700 22px Mono,monospace;background:#121212;color:#fff;padding:8px 14px;border-radius:10px;display:none;z-index:50}#clock.show{display:block}#clock.late{background:#d7322a}
+</style></head><body><div id="stage">
+
+<section class="blue" data-on="reducto pangram hermes modal" data-t="0:00"><div class="m rise">Non-Slop NYC</div><h1 class="rise" style="--i:1;margin-top:120px">Study OS<br><em>in Hermes</em></h1><p class="big rise" style="--i:3;margin-top:64px;font-size:54px">One real page in. A lesson you can trust out.</p>
+<aside>On screen while you walk up. The timer starts when you leave this slide. "Reducto reads, Pangram checks, Hermes teaches, Modal speaks."</aside></section>
+
+<section data-on="pangram" data-t="0:00" data-step><h2 class="rise">Which one did <em>AI</em> write?</h2><div class="ab"><div class="abc me"><div class="abtop"><i>A</i><b>Michael Faraday, 1861</b><span class="m">100% human</span></div><p><span>Now I must ask you to observe the cup that is formed. As the air comes to the candle, it moves upwards by the force of the current which the heat of the candle produces, and it so cools all the sides of the wax, tallow, or fuel as to keep the edge much cooler than the part within.</span></p></div><div class="abc ai"><div class="abtop"><i>B</i><b>A model</b><span class="m">100% AI</span></div><p><span>A burning candle is a remarkable example of how simple objects can reveal complex scientific principles. When the wick is lit, the heat from the flame melts the surrounding wax, creating a small pool of liquid fuel. This liquid is then drawn upward through the wick by capillary action, where it vaporizes and ultimately combusts.</span></p></div></div>
+<aside>"Hands up for A. Hands up for B." Then press once to reveal. "A is Michael Faraday, 1861. B is a model. Pangram got both. Slop gets in twice: in what you study, and in what you hand in."</aside></section>
+
+<section class="yellow" data-on="reducto" data-t="0:20" data-cues="0:reducto,3.2:pangram"><div class="side"><div class="tag">Drop a page</div><h2>Nobody <em>wrote</em> it</h2><p class="big">So it stops.</p></div><video class="clip" src="media/stop.mp4" muted playsinline preload="auto"></video>
+<aside>"We drop in an article. Reducto reads every block. Pangram says it is AI. So Study OS stops, before you learn from it. You decide." (Clips are recorded.)</aside></section>
+
+<section data-on="reducto" data-t="0:35" data-cues="0:reducto,5.4:pangram,9.8:hermes"><div class="side"><div class="tag">Drop a real one</div><h2>One page <em>in</em></h2><p class="big">A course and a film come out.</p></div><video class="clip" src="media/showcase.mp4" muted playsinline preload="auto"></video>
+<aside>"Now a real one: Faraday, 1861. Reducto reads it. Pangram: one hundred percent human. Claude, in Hermes, plans a short course and makes a film of it. First time takes about a minute and a half; this one is saved."</aside></section>
+
+<section data-on="reducto pangram hermes" data-t="1:00"><div class="side"><div class="tag">Explain your choices</div><h2>Show the <em>seams</em></h2><p class="big">Every line: its source, or none. Every choice: a reason.</p></div><video class="clip" src="media/seams.mp4" muted playsinline preload="auto"></video>
+<aside>"Our lessons are written by AI, so we label them. Blue lines have a source line. Red dots are the model's own words, and it says so. Code checks every quote, word for word. And every choice has a reason."</aside></section>
+
+<section class="pink" data-on="hermes" data-t="1:25"><div class="side"><div class="tag">Made for the lesson</div><h2>Not a <em>quiz</em></h2><p class="big">Work the idea with your hands.</p></div><video class="clip" src="media/play.mp4" muted playsinline preload="auto"></video>
+<aside>"Hermes writes a game for the lesson. You move the heat, and the molecules are the idea. Melted or boiled, it is still wax."</aside></section>
+
+<section data-on="modal" data-t="1:45"><div class="side"><div class="tag">Sound on</div><h2>It talks, it <em>draws</em></h2><p class="big">And it asks you back.</p></div><video class="clip" src="media/modal.mp4" data-sound playsinline preload="auto"></video>
+<aside>Say nothing for the first few seconds: let the voice play. Then: "That voice is ours, on Modal. It sleeps when nobody talks. It draws while it speaks, and it asks instead of telling."</aside></section>
+
+<section class="orange" data-on="reducto pangram hermes modal" data-t="2:06" data-words="Film|Short|Podcast|Quiz|Handwriting|Mock exam|Three signals|Google Calendar" data-each="1.25"><div class="side"><div class="tag">All in there</div><h2 class="word" style="font-size:78px">Film</h2></div><video class="clip" src="media/burst.mp4" muted playsinline preload="auto"></video>
+<aside>"And all of this is in there too." Then let it run. Ten seconds.</aside></section>
+
+<section data-on="" data-t="2:18"><h2 class="rise">What we said <em>no</em> to</h2><div class="row"><div class="card rise" style="--i:1;"><b>No gradients</b><p>Flat blocks read from the back row</p></div><div class="card rise" style="--i:2;background:#ffc93c"><b>No proof</b><p>A detector starts a talk, never ends one</p></div><div class="card rise" style="--i:3;background:#f39ac3"><b>No rewriting</b><p>It never writes your essay for you</p></div></div><div class="row" style="margin-top:44px"><div class="card rise" style="--i:4;background:#8f9cff"><b>No forced analogies</b><p>A cell isn't a Kubernetes cluster</p></div><div class="card rise" style="--i:5;background:#f26b2e"><b>No filler</b><p>Stock phrases get sent back</p></div><div class="card rise" style="--i:6;"><b>No account</b><p>Your work is one file you own</p></div></div>
+<aside>"Taste is what we left out." Pick two: "We never call a detector proof." "We never write your essay for you."</aside></section>
+
+<section data-on="reducto pangram hermes modal" data-t="2:32" class="blue"><div style="position:absolute;right:130px;top:150px;width:560px;padding:34px;background:#fff;border:4px solid #121212;border-radius:34px;box-shadow:16px 16px 0 #121212" class="rise"><img src="media/qr.svg" alt="QR code for the Study OS plugin" style="width:100%;display:block;image-rendering:pixelated"><p class="m" style="color:#121212;text-align:center;margin-top:12px">Scan to play</p></div><h1 class="rise" style="margin-top:60px">Try <em>it</em></h1><p class="big rise" style="--i:2;margin-top:70px;font-size:46px;max-width:1080px">Tell your Hermes:</p><div class="cmd rise" style="--i:3;margin-top:24px;max-width:1080px;font-size:30px;line-height:1.45">"Install the plugin pukujan-lab-2/study-os-hermes and set it up for me"</div><p class="big rise" style="--i:4;margin-top:54px;font-size:40px">or <span class="m" style="text-transform:none;font-size:25px;white-space:nowrap;display:block;margin-top:10px;max-width:1080px">hermes plugins install pukujan-lab-2/study-os-hermes --enable</span></p>
+<aside>"Reducto reads, Pangram checks, Hermes teaches, Modal speaks. It is one plugin, open source, your own keys. Scan it and play that game on your phone right now." Then stop. Everything after this slide is for questions.</aside></section>
+
+<section data-on="pangram"><h2 class="rise">Two kinds of <em>slop</em></h2><div class="vs"><div class="card rise" style="--i:1;background:#ffc93c"><b>1</b><p style="font-size:40px;font-weight:600">What you learn from.</p><p>An article nobody wrote.</p></div><div class="card rise" style="--i:2;background:#f39ac3"><b>2</b><p style="font-size:40px;font-weight:600">What you hand in.</p><p>An essay nobody wrote.</p></div></div>
+<aside>Slop comes in at two ends: the thing you study, and the thing you submit. We check both, and we teach in between.</aside></section>
+
+<section data-on="hermes" class="pink"><div class="side"><div class="tag">HyperFrames</div><h2>Watch or <em>listen</em></h2><p class="big">Explainer, Short, slides. Podcast, recap, quiz in your ear.</p></div><video class="clip" src="media/watch.mp4" muted playsinline preload="auto"></video><div class="foot"><span>Made from the same lesson</span></div>
+<aside>The same lesson as a video, a Short, slides or a podcast. The videos are HyperFrames compositions.</aside></section>
+
+<section data-on="hermes" class="yellow"><div class="side"><div class="tag">Hermes + Claude</div><h2>Then <em>learn it</em></h2><p class="big">Short lessons. Quizzes that say why you slipped.</p></div><video class="clip" src="media/quiz.mp4" muted playsinline preload="auto"></video><div class="foot"><span>Comes back before you forget it</span></div>
+<aside>It makes a course from your source, and quizzes what you know least.</aside></section>
+
+<section data-on="reducto pangram" class="green"><div class="side"><div class="tag">For teachers</div><h2>PDF to <em>exam</em></h2><p class="big">Drop the reading. Get an assignment or a mock exam.</p></div><video class="clip" src="media/teacher.mp4" muted playsinline preload="auto"></video><div class="foot"><span>Read by Reducto. Set with a deadline.</span></div>
+<aside>The teacher's page. One document becomes work with a due date. Students never see the answers.</aside></section>
+
+<section data-on="reducto"><div class="side"><div class="tag">For students</div><h2>Typed or <em>by hand</em></h2><p class="big">Write on paper, take a photo. Reducto reads it.</p></div><video class="clip" src="media/student.mp4" muted playsinline preload="auto"></video><div class="foot"><span>It also notes typing, pasting and time</span><span><a href="samples/handwriting.png" target="_blank">Open the page</a></span></div>
+<aside>Students can write by hand and send a photo. The app notes typed or pasted, and how long it took, and tells the student so.</aside></section>
+
+<section data-on="pangram" class="yellow"><div class="side"><div class="tag">Pangram</div><h2>Three <em>signals</em></h2><p class="big">How it reads. How it was written. How long it took.</p></div><video class="clip" src="media/signals.mp4" muted playsinline preload="auto"></video><div class="foot"><span>Signals to start a conversation, never proof</span><span><a href="samples/essay-person.txt" target="_blank">Essay A</a> · <a href="samples/essay-ai.txt" target="_blank">Essay B</a></span></div>
+<aside>The sample pasted answer is fully AI and shows red. Maya's sample photo uses Faraday's own words, so it shows green. A detector can be wrong, so we show three signals and call none of them proof.</aside></section>
+
+<section data-on="hermes" class="pink"><div class="side"><div class="tag">Meet</div><h2>Book a <em>session</em></h2><p class="big">One student or a group. Opens in Google Calendar, filled in.</p></div><video class="clip" src="media/meet.mp4" muted playsinline preload="auto"></video><div class="foot"><span>Email opens ready in Gmail too</span></div>
+<aside>Students ask, teachers book. It opens Google Calendar or Gmail already filled in.</aside></section>
+
+<section data-on="reducto pangram hermes modal"><h2 class="rise">What does <em>what</em></h2><div class="row"><div class="card rise" style="--i:1"><b>Hermes</b><p>The app, the agent and the model</p></div><div class="card rise" style="--i:2;background:#ffc93c"><b>Reducto</b><p>Reads PDFs and handwriting</p></div><div class="card rise" style="--i:3;background:#f39ac3"><b>Pangram</b><p>Who wrote it, part by part</p></div></div><div class="row" style="margin-top:44px"><div class="card rise" style="--i:4;background:#8f9cff"><b>Modal</b><p>A voice that sleeps when quiet</p></div><div class="card rise" style="--i:5;background:#f26b2e"><b>HyperFrames</b><p>Every video is a web page</p></div><div class="card rise" style="--i:6"><b>SQLite</b><p>One file on your computer</p></div></div>
+<aside>Each sponsor does one clear job. Turn any of them off and it still works, with less.</aside></section>
+
+
+<div id="strip"><div data-s="reducto">Reducto <span>reads</span></div><div data-s="pangram">Pangram <span>checks</span></div><div data-s="hermes">Hermes <span>teaches</span></div><div data-s="modal">Modal <span>speaks</span></div></div></div><div id="clock">0:00</div><div id="notes"></div><script>
+const S=[...document.querySelectorAll('#stage>section')],stage=document.getElementById('stage'),notes=document.getElementById('notes'),clock=document.getElementById('clock');let i=-1,began=0;
+const light=names=>document.querySelectorAll('#strip div').forEach(d=>d.classList.toggle('on',names.split(' ').includes(d.dataset.s)));
+function fit(){const k=Math.min(innerWidth/1920,innerHeight/1080);stage.style.transform=`scale(${k}) translate(-50%,-50%)`}
+function start(s){s.querySelectorAll('video').forEach(v=>{v.loop=false;v.currentTime=0;if(v.hasAttribute('data-sound'))v.muted=/[?&]mute/.test(location.search);v.play().catch(()=>{v.muted=true;v.play().catch(()=>{})})})}
+S.forEach(s=>{const v=s.querySelector('video');if(!v)return;
+ const cues=s.dataset.cues&&s.dataset.cues.split(',').map(x=>{const[a,b]=x.split(':');return[+a,b]}),words=s.dataset.words&&s.dataset.words.split('|'),w=s.querySelector('.word');
+ if(!cues&&!words)return;
+ const tick=()=>{if(S[i]!==s)return;if(cues){let c=cues[0];cues.forEach(x=>{if(v.currentTime>=x[0])c=x});light(c[1])}if(words){const t=words[Math.min(words.length-1,Math.floor(v.currentTime/+s.dataset.each))];if(w.textContent!==t){w.textContent=t;w.classList.remove('pop');void w.offsetWidth;w.classList.add('pop')}}requestAnimationFrame(tick)};
+ s._tick=tick});
+function go(n){n=Math.max(0,Math.min(S.length-1,n));if(n===i)return;if(i>=0)S[i].querySelectorAll('video').forEach(v=>v.pause());if(i===0&&n===1&&!began)began=Date.now();if(n===0)began=0;S.forEach((s,k)=>s.classList.toggle('on',k===n));i=n;S[n].classList.remove('shown');try{history.replaceState(null,'',location.search+'#'+(n+1))}catch(e){}notes.textContent=(S[n].dataset.t?S[n].dataset.t+'  ':'Backup  ')+(S[n].querySelector('aside')?.textContent||'');light(S[n].dataset.on||'');start(S[n]);if(S[n]._tick)requestAnimationFrame(S[n]._tick)}
+function next(){const s=S[i];if(s.hasAttribute('data-step')&&!s.classList.contains('shown'))s.classList.add('shown');else go(i+1)}
+setInterval(()=>{const t=began?Math.floor((Date.now()-began)/1000):0;clock.textContent=Math.floor(t/60)+':'+String(t%60).padStart(2,'0');clock.classList.toggle('late',t>165)},250);
+addEventListener('resize',fit);fit();
+addEventListener('keydown',e=>{const k=e.key.toLowerCase();if(['arrowright','arrowdown','pagedown',' ','enter'].includes(k)){e.preventDefault();next()}else if(['arrowleft','arrowup','pageup','backspace'].includes(k)){e.preventDefault();go(i-1)}else if(k==='f'){document.fullscreenElement?document.exitFullscreen():document.documentElement.requestFullscreen().catch(()=>{})}else if(k==='n')notes.classList.toggle('show');else if(k==='t')clock.classList.toggle('show');else if(k==='r'){S[i].classList.remove('shown');start(S[i])}});
+addEventListener('click',e=>e.target.closest('a')||(e.clientX<innerWidth*.25?go(i-1):next()));go((+location.hash.slice(1)||1)-1);
+</script></body></html>
