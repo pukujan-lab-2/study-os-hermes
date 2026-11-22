@@ -199,7 +199,9 @@ def _write_one(course_id: str, sid: str) -> None:
     how = how_of(course)
     body = s["body"]
     if not body:
-        body = clean_lesson(llm.text(prompts.LESSON, _lesson_input(course, s, how)), how["compare_to"])
+        from . import label
+
+        body = clean_lesson(label.unstock(clean_lesson(llm.text(prompts.LESSON, _lesson_input(course, s, how)), how["compare_to"])), how["compare_to"])
         run("update sections set body = ? where id = ?", body, sid)
     if not row("select 1 from objectives where section_id = ?", sid):
         quiz = llm.data(prompts.QUIZ, f"{prompts.learner(how)}\n\n<lesson title=\"{s['title']}\">\n{body}\n</lesson>", prompts.QUIZ_SCHEMA, purpose="quiz")

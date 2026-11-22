@@ -1,5 +1,5 @@
 name: study-os-solo
-version: 0.3.1
+version: 0.4.0
 manifest_version: 2
 api_version: 1
 description: Make a course from a topic or your own material; read, watch, listen and talk it through; quiz, review and explain back. Local, no account.

@@ -19,11 +19,11 @@ def _engine():
         mod = importlib.util.module_from_spec(spec)
         sys.modules[NAME] = mod
         spec.loader.exec_module(mod)
-    return {n: importlib.import_module(f"{NAME}.{n}") for n in ("courses", "ingest", "llm", "quiz", "services", "store", "prompts", "media", "tutor", "voice", "essay", "classroom")}
+    return {n: importlib.import_module(f"{NAME}.{n}") for n in ("courses", "ingest", "llm", "quiz", "services", "store", "prompts", "media", "tutor", "voice", "essay", "classroom", "label")}
 
 
 _m = _engine()
-courses, ingest, llm, quiz, services, store, prompts, media, tutor, voice, essay, classroom = _m.values()
+courses, ingest, llm, quiz, services, store, prompts, media, tutor, voice, essay, classroom, label = _m.values()
 router = APIRouter()
 
 
@@ -126,6 +126,11 @@ async def retry(course_id: str):
 @router.delete("/courses/{course_id}")
 async def remove(course_id: str):
     return {"ok": await call(courses.delete, course_id)}
+
+
+@router.get("/sections/{section_id}/label")
+async def get_label(section_id: str):
+    return await call(label.get, section_id)
 
 
 @router.get("/sections/{section_id}/wordings")

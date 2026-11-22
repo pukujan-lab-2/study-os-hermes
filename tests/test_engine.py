@@ -15,7 +15,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from engine import classroom, courses, essay, film, ingest, llm, mastery, media, play, quiz, services, store, tutor, voice  # noqa: E402
+from engine import classroom, courses, essay, film, ingest, label, llm, mastery, media, play, quiz, services, store, tutor, voice  # noqa: E402
 
 QUIZ = {
     "objectives": [
@@ -234,6 +234,26 @@ class Asking(Case):
 
 
 class Rewording(Case):
+    def test_a_label_only_shows_quotes_that_are_really_in_the_source(self):
+        body = "### Why\n\nWax climbs the wick because the gaps are thin, so it rises.\n\n- A candle makes its own cup as the edge melts last.\n\n> **Compare it to cooking:** no."
+        self.assertEqual(len(label.lines(body)), 2)
+        src = "The wax, said Faraday, ascends the wick by what is called capillary attraction. A beautiful cup is formed."
+        self.assertTrue(label.found_in("ascends the wick by what is called capillary attraction", src))
+        self.assertFalse(label.found_in("the wax is pulled up by tiny straws in the wick", src))
+        self.assertEqual(label.stock("Let's dive in: it plays a crucial role."), ["Let's dive", "plays a crucial role"])
+        self.assertEqual(label.stock("Wax melts, then climbs."), [])
+        sid = self.made()["list"][0]["id"]
+        with store.db() as c:
+            c.execute("update sections set body = ?, source = ? where id = ?", (body, src, sid))
+        real = llm.data
+        llm.data = lambda *a, **k: {"lines": [{"n": 1, "quote": "ascends the wick by what is called capillary attraction"}, {"n": 2, "quote": "wax is pulled up by tiny straws, invented here"}], "choices": [{"choice": "Opens with the wick", "because": "it is the puzzle", "instead_of": "a definition"}]}
+        try:
+            got = label.get(sid)
+        finally:
+            llm.data = real
+        self.assertEqual((got["tied"], got["refused"], got["lines"][1]["quote"]), (1, 1, None))
+        self.assertEqual(label.get(sid)["tied"], 1)  # remembered
+
     def test_preview_use_and_switch_back(self):
         c = self.made()
         s = c["list"][0]
