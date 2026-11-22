@@ -111,6 +111,30 @@ def save_upload(name: str, data: bytes) -> dict:
     return {"id": uid, "name": name[:120], "characters": len(text), "read_by": by}
 
 
+SAMPLES = {
+    "ai-article": ("ai-article.pdf", "The Science of Candles.pdf"),
+    "faraday": ("faraday-1861.pdf", "Faraday, 1861.pdf"),
+    "essay-person": ("essay-person.txt", ""),
+    "essay-ai": ("essay-ai.txt", ""),
+    "handwriting": ("handwriting.png", "handwriting.png"),
+}
+
+
+def sample(key: str) -> dict:
+    """One of the bundled samples, ready to use: a document becomes an upload, the others become text."""
+    if key not in SAMPLES:
+        raise Problem("Unknown sample.")
+    from pathlib import Path
+
+    file, name = SAMPLES[key]
+    data = (Path(__file__).resolve().parent.parent / "samples" / file).read_bytes()
+    if file.endswith(".pdf"):
+        return {"upload": save_upload(name, data)}
+    if file.endswith(".png"):
+        return {"text": photo(name, data)}
+    return {"text": data.decode("utf-8").strip()}
+
+
 def upload(uid: str) -> dict:
     u = row("select * from uploads where id = ?", uid)
     if not u:

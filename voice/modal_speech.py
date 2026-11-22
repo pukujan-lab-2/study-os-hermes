@@ -29,7 +29,7 @@ app = modal.App("study-os-solo-speech", image=image)
 cache = modal.Volume.from_name("study-os-solo-speech-cache", create_if_missing=True)
 
 
-@app.cls(gpu="L4", volumes={"/cache": cache}, secrets=[modal.Secret.from_name("study-os-solo-speech", required_keys=["SPEECH_TOKEN"])], scaledown_window=180, timeout=600, max_containers=1)
+@app.cls(gpu=["L4", "T4", "A10"], volumes={"/cache": cache}, secrets=[modal.Secret.from_name("study-os-solo-speech", required_keys=["SPEECH_TOKEN"])], scaledown_window=180, timeout=600, max_containers=1)
 @modal.concurrent(max_inputs=4)
 class Speech:
     @modal.enter()

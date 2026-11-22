@@ -69,6 +69,7 @@ create table if not exists meetings (
   status text not null default 'asked', asked_by text not null default 'student', created_at text not null
 );
 create table if not exists uploads (id text primary key, name text not null, text text not null, read_by text not null, created_at text not null);
+create table if not exists saved (key text primary key, value text not null, created_at text not null);
 create table if not exists prefs (key text primary key, value text not null);
 """
 
@@ -138,6 +139,28 @@ def loads(x, default):
         return json.loads(x) if x else default
     except ValueError:
         return default
+
+
+def saved_key(kind: str, *parts) -> str:
+    import hashlib
+
+    h = hashlib.sha256()
+    for p in parts:
+        h.update(p if isinstance(p, bytes) else str(p).encode())
+        h.update(b"\0")
+    return f"{kind}:{h.hexdigest()[:40]}"
+
+
+def recall(key: str):
+    """Something already worked out for exactly this input, or None."""
+    r = row("select value from saved where key = ?", key)
+    return loads(r["value"], None) if r else None
+
+
+def remember(key: str, value) -> None:
+    with db() as c:
+        c.execute("insert into saved (key, value, created_at) values (?, ?, ?) on conflict(key) do update set value = excluded.value, created_at = excluded.created_at", (key, json.dumps(value), now()))
+        c.execute("delete from saved where key not in (select key from saved order by created_at desc limit 600)")
 
 
 def get_prefs() -> dict:

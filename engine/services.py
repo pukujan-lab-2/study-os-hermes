@@ -12,7 +12,7 @@ import urllib.request
 import uuid
 import wave
 
-from . import PLUGIN
+from . import PLUGIN, store
 
 REDUCTO = "https://platform.reducto.ai"
 PANGRAM = "https://text.external-api.pangram.com"
@@ -88,6 +88,9 @@ def reducto(data: bytes, name: str, mime: str = "application/pdf") -> str:
     key = secret("REDUCTO_API_KEY")
     if not key:
         raise ServiceError("No Reducto key.")
+    known = store.saved_key("reducto", data)
+    if old := store.recall(known):  # the same file is never sent, or paid for, twice
+        return old
     base, auth = _safe(setting("reducto_url", REDUCTO)), {"Authorization": f"Bearer {key}"}
     mark = uuid.uuid4().hex
     safe_name = "".join(ch if ch.isalnum() or ch in "._-" else "_" for ch in name)[:80] or "document"
@@ -101,7 +104,10 @@ def reducto(data: bytes, name: str, mime: str = "application/pdf") -> str:
     if result.get("type") == "url" and result.get("url"):  # big results are a short-lived link, fetched without the key
         raw, _ = _http("GET", _safe(result["url"]))
         result = json.loads(raw)
-    return "\n\n".join(c.get("content", "") for c in result.get("chunks") or []).strip()
+    text = "\n\n".join(c.get("content", "") for c in result.get("chunks") or []).strip()
+    if text:
+        store.remember(known, text)
+    return text
 
 
 # ---- Pangram: how a text reads -------------------------------------------------------------------------------
@@ -121,6 +127,9 @@ def pangram(text: str) -> dict:
     key = secret("PANGRAM_API_KEY")
     if not key:
         raise ServiceError("No Pangram key.")
+    known = store.saved_key("pangram", text)
+    if old := store.recall(known):
+        return {**old, "saved": True}
     base, h = _safe(setting("pangram_url", PANGRAM)), {"x-api-key": key}
     t = _json("POST", f"{base}/task", h, {"text": text}, timeout=20)
     task, end = t.get("task_id"), time.time() + 40
@@ -131,7 +140,9 @@ def pangram(text: str) -> dict:
         t = _json("GET", f"{base}/task/{task}", h, timeout=20)
     ai, assisted = float(t.get("fraction_ai") or 0), float(t.get("fraction_ai_assisted") or 0)
     human = float(t["fraction_human"]) if t.get("fraction_human") is not None else max(0.0, 1 - ai - assisted)
-    return {"label": t.get("prediction_short") or ("Human" if human >= 0.5 else "AI"), "ai": round(ai, 3), "assisted": round(assisted, 3), "human": round(human, 3), "parts": _parts(t)}
+    out = {"label": t.get("prediction_short") or ("Human" if human >= 0.5 else "AI"), "ai": round(ai, 3), "assisted": round(assisted, 3), "human": round(human, 3), "parts": _parts(t)}
+    store.remember(known, out)
+    return out
 
 
 # ---- Modal: a voice and an ear on your own account (voice/modal_speech.py) -------------------------------------

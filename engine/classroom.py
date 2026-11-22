@@ -10,7 +10,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import quote
 
-from . import llm, prompts, services, voice
+from . import llm, prompts, services, store, voice
 from .courses import Problem, _changed, background
 from .store import db, get_prefs, loads, new_id, now, row, rows, run
 
@@ -101,10 +101,12 @@ def make(*, kind: str, name: str, text: str, read_by: str, due: str | None, minu
 
     def work():
         try:
-            out = llm.data(MAKE, f"Make: {kind}\n\n<document name=\"{name}\">\n{text[:30000]}\n</document>", PAPER, purpose="assignment")
+            known = store.saved_key("paper", kind, text[:30000])
+            out = store.recall(known) or llm.data(MAKE, f"Make: {kind}\n\n<document name=\"{name}\">\n{text[:30000]}\n</document>", PAPER, purpose="assignment")
             qs = clean_questions(out["questions"])
             if not qs:
                 raise Problem("It came back without usable questions. Try again.")
+            store.remember(known, out)
             run("update assignments set title = ?, instructions = ?, questions = ?, status = 'draft' where id = ?", out["title"][:160], out["instructions"][:600], json.dumps(qs), aid)
         except Exception as err:  # noqa: BLE001
             run("update assignments set status = 'failed', error = ? where id = ?", str(err)[:300], aid)

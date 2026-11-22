@@ -134,6 +134,14 @@ class Building(Case):
         self.assertTrue(all(s["from_material"] for s in c["list"]))
         self.assertTrue(any("<source>" in t for k, t in self.model.calls if k == "text"))
 
+    def test_asking_for_the_same_course_again_opens_it(self):
+        c = self.made()
+        self.assertEqual(courses.create(topic="Osmosis"), c["id"])
+        self.assertNotEqual(courses.create(topic="osmosis", how={"level": 6}), c["id"])
+        self.wait(courses.create(topic="osmosis", how={"level": 6}))
+        courses.delete(c["id"])
+        self.assertNotEqual(courses.create(topic="osmosis"), c["id"])
+
     def test_too_little_to_go_on_is_refused(self):
         with self.assertRaises(courses.Problem):
             courses.create(material="short")
@@ -318,6 +326,18 @@ class Services(Case):
         self.assertEqual(services.pangram("some words"), {"label": "AI", "ai": 0.9, "assisted": 0.1, "human": 0.0, "parts": []})
         self.assertEqual({k.lower(): v for k, v in self.seen[0][1].items()}["x-api-key"], "pk")
 
+    def test_the_same_file_or_text_is_sent_only_once(self):
+        a = ingest.read("notes.pdf", b"%PDF-1.7 fake")
+        n = len(self.seen)
+        self.assertEqual(ingest.read("other name.pdf", b"%PDF-1.7 fake"), a)
+        self.assertEqual(len(self.seen), n)
+        v = services.pangram("some words")
+        n = len(self.seen)
+        self.assertEqual({k: x for k, x in services.pangram("some words").items() if k != "saved"}, v)
+        self.assertEqual(len(self.seen), n)
+        services.pangram("other words")
+        self.assertGreater(len(self.seen), n)
+
     def test_modal_sound_becomes_a_wav(self):
         import base64
         import wave
@@ -494,6 +514,16 @@ class Tools(Case):
         self.assertIn("Osmosis", json.loads(self.tools.question({"course_id": "physics"}))["error"])
         self.assertEqual(json.loads(self.tools.lesson({"course_id": c["id"], "section": 9}))["error"], "That course has 3 sections.")
         self.assertIn("error", json.loads(self.tools.answer({"question_id": "nope"})))
+
+
+class Samples(Case):
+    def test_the_bundled_samples_are_there_and_usable(self):
+        self.assertGreater(len(ingest.sample("essay-person")["text"].split()), 100)
+        self.assertGreater(len(ingest.sample("essay-ai")["text"].split()), 100)
+        for k, (f, _) in ingest.SAMPLES.items():
+            self.assertTrue((Path(__file__).resolve().parent.parent / "samples" / f).exists(), k)
+        with self.assertRaises(courses.Problem):
+            ingest.sample("../../etc/passwd")
 
 
 class Files(Case):

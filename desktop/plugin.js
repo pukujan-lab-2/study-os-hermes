@@ -727,6 +727,16 @@ function Talk({ ctx, section, onChange }) {
       state === 'speaking' && h(Btn, { icon: 'stop', onClick: () => { run.current++; sp.stop(); setState('idle') } }, 'Quiet')))
 }
 
+/** One-click samples, so nothing has to be found or dragged. */
+function Samples({ ctx, list, busy, onUse, onError }) {
+  const [at, setAt] = useState(null)
+  const use = async k => {
+    setAt(k)
+    try { onUse(k, await ctx.rest(`/samples/${k}`, { method: 'POST', timeoutMs: 300000 })) } catch (err) { onError(msg(err)) }
+    setAt(null)
+  }
+  return h('div.so-samples', h('span.so-label', 'Try a sample'), list.map(([k, label, kind]) => h('button', { key: k, type: 'button', disabled: !!at || busy, className: kind, onClick: () => use(k) }, h(Icon, { n: at === k ? 'spin' : kind === 'hand' ? 'cam' : 'file', size: 15 }), label)))
+}
 /* ---- class: shared pieces --------------------------------------------------------------------------------------- */
 
 const openLink = (ctx, url) => { if (ctx.os && ctx.os.openExternal) ctx.os.openExternal(url); else window.open(url, '_blank') }
@@ -865,6 +875,7 @@ function WorkRoom({ ctx, a, services, onClose }) {
       q.kind === 'choice'
         ? h('div.so-opts', q.options.map((o, k) => h('button', { key: k, type: 'button', disabled: done, className: cls('so-opt', (ans[q.id] || {}).text === o && 'picked'), onClick: () => put(q.id, o) }, h('span.so-optn', 'ABCD'[k]), h('span', o))))
         : h('div', h('textarea.so-input', { rows: q.kind === 'essay' ? 9 : 3, value: (ans[q.id] || {}).text || '', disabled: done || busy === q.id, spellCheck: true, placeholder: 'Your own words', 'aria-label': `Answer ${i + 1}`, onChange: e => type(q, e) }),
+            !done && services.reducto && q.kind === 'essay' && h(Samples, { ctx, busy: !!busy, list: [['handwriting', 'Handwritten page', 'hand']], onError: setError, onUse: (k, r) => { proc.current.photos += 1; put(q.id, r.text, 'photo') } }),
             h('div.so-row', h('span.so-dim.so-grow', (ans[q.id] || {}).by === 'photo' ? 'Read from your handwriting by Reducto. Fix anything it misread.' : `${(((ans[q.id] || {}).text || '').trim().match(/\S+/g) || []).length} words`), !done && services.reducto && h('label.so-btn.so-quiet', { className: 'so-btn so-quiet' }, h(Icon, { n: busy === q.id ? 'spin' : 'cam', size: 16 }), busy === q.id ? 'Reading it' : 'Photo of handwriting', h('input', { type: 'file', hidden: true, accept: 'image/png,image/jpeg,application/pdf', onChange: e => photo(q, e.target.files[0]) })))),
       marks[q.id] && h('p.so-dim', marks[q.id].why))),
     error && h(Note, { bad: true }, error),
@@ -895,6 +906,7 @@ function NewWork({ ctx, onDone }) {
       : h('div', { className: cls('so-drop', over && 'over'), style: { marginTop: 14 }, onDragOver: e => { e.preventDefault(); setOver(true) }, onDragLeave: () => setOver(false), onDrop: e => { e.preventDefault(); setOver(false); add(e.dataTransfer.files[0]) } },
           h('input', { ref: pick, type: 'file', hidden: true, accept: '.pdf,.docx,.txt,.md', onChange: e => add(e.target.files[0]) }),
           h(Icon, { n: busy ? 'spin' : up ? 'check' : 'file', size: 34 }), up ? h('div', h('b', up.name), h('p.so-dim', `${up.characters.toLocaleString()} characters, read by ${up.read_by}`)) : h('b', busy ? 'Reading it' : 'Drop the document'), !busy && h('div.so-row', h(Btn, { onClick: () => pick.current.click() }, up ? 'Choose another' : 'Choose a file'), !up && h(Btn, { onClick: () => setPaste(true) }, 'Paste instead'))),
+    !paste && h(Samples, { ctx, busy, list: [['faraday', 'Faraday, 1861', 'hu'], ['ai-article', 'AI-written article', 'ai']], onError: setError, onUse: (k, r) => { const u = r.upload; setError(null); setUp(u); setSrc(undefined); ctx.rest(`/uploads/${u.id}/check`, { method: 'POST', timeoutMs: 120000 }).then(setSrc).catch(() => setSrc(null)) } }),
     up && h(SourceCheck, { v: src }),
     error && h(Note, { bad: true }, error),
     h('div.so-row.so-end', h('label.so-row', h('span.so-dim', 'Due'), h('input.so-input', { type: 'datetime-local', value: due, style: { width: 210 }, onChange: e => setDue(e.target.value) })), h('span.so-grow'), h(Btn, { kind: 'main', disabled: busy || !(up || (paste && text.trim().length > 200)), onClick: make }, kind === 'exam' ? 'Make the exam' : 'Make the assignment')))
@@ -905,7 +917,7 @@ function SourceCheck({ v }) {
   if (v === null) return null
   if (v === undefined) return h('div.so-source2', h(Icon, { n: 'spin', size: 18 }), h('span', 'Pangram is checking who wrote it'))
   const slop = v.ai > 0.5
-  return h('div', h('button.so-source2', { type: 'button', className: cls('so-source2', slop ? 'bad' : 'good'), 'aria-expanded': open, onClick: () => setOpen(!open) }, h(Icon, { n: slop ? 'x' : 'check', size: 20 }), h('div.so-grow', h('b', slop ? 'This source reads as AI-written' : v.ai > 0.1 ? 'Mostly written by people' : 'Written by people'), h(Mix, { v })), h('span', `${pct(v.human)}% human`)), open && h(Painted, { v }))
+  return h('div', h('button.so-source2', { type: 'button', className: cls('so-source2', slop ? 'bad' : 'good'), 'aria-expanded': open, onClick: () => setOpen(!open) }, h(Icon, { n: slop ? 'x' : 'check', size: 20 }), h('div.so-grow', h('b', slop ? 'This source reads as AI-written' : v.ai > 0.1 ? 'Mostly written by people' : 'Written by people'), h(Mix, { v })), h('span', `${pct(v.human)}% human`, v.saved && h('span.so-dim', ' · saved'))), open && h(Painted, { v }))
 }
 const Spark = ({ line, pasted }) => {
   const l = line && line.length > 1 ? line : [0, 0]
@@ -1006,6 +1018,7 @@ function Essay({ ctx, home }) {
     h('div.so-card.so-in',
       h('label', h('span.so-label', 'The task (optional)'), h('input.so-input', { value: task, maxLength: 600, placeholder: 'Explain why bread rises, for a class report', onChange: e => setTask(e.target.value) })),
       h('label.so-block', h('span.so-label', 'The draft'), h('textarea.so-input', { rows: 11, value: text, maxLength: 20000, placeholder: 'Paste at least 50 words', onChange: e => setText(e.target.value) })),
+      h(Samples, { ctx, busy: !!busy, list: [['essay-person', 'A person wrote this', 'hu'], ['essay-ai', 'An AI wrote this', 'ai']], onError: setError, onUse: (k, r) => { setText(r.text); setTask('Explain how a candle burns'); setR(null); setPair(null); setError(null) } }),
       h('div.so-row.so-end', h('span.so-dim.so-grow', `${n} words`), h(Btn, { disabled: n < 50 || busy, onClick: () => go('ab') }, busy === 'ab' ? [h(Icon, { key: 1, n: 'spin', size: 16 }), 'Writing the other one'] : 'Blind A/B test'), h(Btn, { kind: 'main', disabled: n < 50 || busy, onClick: () => go('check') }, busy === 'check' ? [h(Icon, { key: 1, n: 'spin', size: 16 }), 'Reading it'] : 'Check it')),
       error && h(Note, { bad: true }, error),
       !home.services.pangram && h(Note, 'Feedback works now. To see whether a text reads as AI-written, add a Pangram key in Settings, Plugins, Study OS Solo.')),
@@ -1118,6 +1131,7 @@ function NewCourse({ ctx, home, go }) {
         h(Icon, { n: busy ? 'spin' : up ? 'check' : 'file', size: 34 }),
         up ? h('div', h('b', up.name), h('p.so-dim', `${up.characters.toLocaleString()} characters, read by ${up.read_by}`)) : h('div', h('b', busy ? 'Reading it' : 'Drop a file here'), h('p.so-dim', home.services.reducto ? 'PDF, scan, Word or text. Reducto reads PDFs.' : 'PDF, Word or text. Read on this computer.')),
         h(Btn, { disabled: busy, onClick: () => pick.current.click() }, up ? 'Choose another' : 'Choose a file')),
+      mode === 'file' && h(Samples, { ctx, busy, list: [['ai-article', 'AI-written article', 'ai'], ['faraday', 'Faraday, 1861', 'hu']], onError: setError, onUse: (k, r) => { const u = r.upload; setError(null); setUp(u); setSrc(undefined); if (home.services.pangram) ctx.rest(`/uploads/${u.id}/check`, { method: 'POST', timeoutMs: 120000 }).then(setSrc).catch(() => setSrc(null)); else setSrc(null) } }),
       mode === 'file' && up && h(SourceCheck, { v: src }),
       h(How, { how, set: setHow, meta: home }),
       error && h(Note, { bad: true }, error),
@@ -1309,7 +1323,7 @@ const LOOKS = `
 .so-signals{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px}.so-big2{display:block;font-size:44px;line-height:1.05;letter-spacing:-.04em;font-weight:780;margin-bottom:8px}.so-big2 span{font-size:16px;letter-spacing:0;font-weight:500;color:var(--so-3)}.so-spark{display:block;width:100%;height:40px}.so-spark path{fill:color-mix(in srgb,var(--so-a) 30%,transparent);stroke:var(--so-a);stroke-width:2;vector-effect:non-scaling-stroke}.so-spark .bad{fill:color-mix(in srgb,var(--so-bad) 25%,transparent);stroke:var(--so-bad)}.so-mid{font-size:clamp(30px,5cqw,48px)!important}.so-pts{width:74px!important;text-align:center;padding:7px!important}.so-ans{white-space:pre-wrap;margin-top:12px!important;line-height:1.7}
 .so-grid{border-collapse:separate;border-spacing:0;width:100%;margin-top:14px}.so-grid th{text-align:left;font-weight:500;padding:9px 14px 9px 0;vertical-align:middle}.so-grid thead b,.so-grid thead .so-dim{display:block;max-width:190px}.so-grid td{padding:6px 14px 6px 0}.so-grid tbody tr>*{border-top:1px solid color-mix(in srgb,var(--so-ink) 12%,transparent)}.so-grid tbody th{display:flex;gap:11px;align-items:center;font-weight:600}.so-face{display:grid;place-items:center;width:34px;height:34px;border-radius:99px;background:#f39ac3;color:#121212;border:1.5px solid var(--so-line);font-weight:700}.so-grid tr:nth-child(2n) .so-face{background:#8f9cff}.so-grid tr:nth-child(3n) .so-face{background:#ffc93c}.so-dot2{display:block;width:16px;height:16px;border-radius:99px;border:1.5px dashed var(--so-3)}.so-dot2.half{border-style:solid;background:linear-gradient(90deg,var(--so-a) 50%,transparent 0)}.so-dot2.late{border:1.5px solid var(--so-bad)}.so-cell{display:inline-flex!important;gap:10px;align-items:center;padding:8px 14px!important;border-radius:12px;border:1.5px solid var(--so-line)!important;background:var(--so-card)!important;font-size:13px;font-weight:600}.so-cell:hover{box-shadow:3px 3px 0 var(--so-line)}.so-cell.back{opacity:.75}.so-qs{margin-top:14px;list-style:decimal}
 @container (max-width:780px){.so-signals{grid-template-columns:1fr}.so-cal{grid-template-columns:repeat(7,minmax(44px,1fr))}.so-day{min-height:58px;padding:5px}.so-day i{font-size:0;height:8px;padding:0}.so-when{width:auto}}
-.so-talkgrid{display:grid;grid-template-columns:minmax(0,1.35fr) minmax(0,1fr);gap:18px;align-items:start}.so-talkgrid.solo{grid-template-columns:1fr}@container (max-width:900px){.so-talkgrid{grid-template-columns:1fr}}
+.so-samples{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:14px}.so-samples .so-label{margin:0 4px 0 0}.so-samples button{display:inline-flex;gap:8px;align-items:center;padding:7px 14px;border-radius:99px;border:1.5px dashed var(--so-line);font-size:13px;font-weight:600;transition:background .2s}.so-samples button:hover:not(:disabled){border-style:solid}.so-samples .ai svg{color:var(--so-bad)}.so-samples .hu svg{color:var(--so-good)}.so-talkgrid{display:grid;grid-template-columns:minmax(0,1.35fr) minmax(0,1fr);gap:18px;align-items:start}.so-talkgrid.solo{grid-template-columns:1fr}@container (max-width:900px){.so-talkgrid{grid-template-columns:1fr}}
 @media (prefers-reduced-motion:reduce){.so-stroke{stroke-dashoffset:0}.so-tint{opacity:.2}.so-ink{clip-path:none}}
 `
 

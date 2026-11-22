@@ -80,7 +80,12 @@ def create(*, topic: str | None = None, material: str | None = None, name: str |
         raise Problem("Say what you want to learn, or add at least a paragraph of material.")
     p = store.get_prefs()
     h = clean_how(how, {"level": p["level"], "story": p["story"], "compare_to": p["compare_to"]})
+    known = store.saved_key("course", topic.lower(), material, json.dumps(h, sort_keys=True))
+    old = store.recall(known)
+    if old and row("select 1 from courses where id = ? and status != 'failed'", old):
+        return old  # made before, from exactly this
     cid = new_id()
+    store.remember(known, cid)
     with db() as c:
         c.execute(
             "insert into courses (id, title, level, story, compare_to, source_kind, source_name, created_at) values (?,?,?,?,?,?,?,?)",

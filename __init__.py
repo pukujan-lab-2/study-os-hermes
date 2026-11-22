@@ -24,4 +24,5 @@ def register(ctx):
         ("study_explain_back", schemas.EXPLAIN_BACK, tools.explain_back),
     ):
         ctx.register_tool(name=name, toolset=TOOLSET, schema=schema, handler=handler)
+    ctx.register_skill("setup", Path(__file__).parent / "skills" / "setup" / "SKILL.md")
     ctx.register_skill("study", Path(__file__).parent / "skills" / "study" / "SKILL.md")

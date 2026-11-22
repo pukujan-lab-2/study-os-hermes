@@ -10,6 +10,8 @@ Learn anything inside [Hermes](https://github.com/NousResearch/hermes-agent), on
 hermes plugins install pukujan-lab-2/study-os-hermes --enable
 ```
 
+**Let your Hermes do it:** tell it *"Install the plugin pukujan-lab-2/study-os-hermes and set it up for me."* It comes with a `setup` skill that walks through the rest.
+
 Then, in Hermes Desktop, open **Capabilities → Plugins**, choose **Rescan**, and turn on **Study OS Solo**. **Study OS** and **Study OS Teacher** appear in the sidebar. In chat, just ask: "Make me a course on how vaccines work", "Quiz me on what's due", "Teach me section 2".
 
 ## What it does

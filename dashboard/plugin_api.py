@@ -297,6 +297,11 @@ class Mail(BaseModel):
     body: str = Field("", max_length=4000)
 
 
+@router.post("/samples/{key}")
+async def sample(key: str):
+    return await call(ingest.sample, key)
+
+
 @router.post("/uploads/{uid}/check")
 async def upload_check(uid: str):
     return await call(ingest.check, uid)
