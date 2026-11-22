@@ -1,0 +1,25 @@
+name: study-os-solo
+version: 0.1.0
+manifest_version: 2
+api_version: 1
+description: Make a course from a topic or your own material, read it, quiz yourself, review at the right time and explain it back. Local, no account.
+author: Study OS
+homepage: https://github.com/pukujan-lab-2/study-os-hermes
+tags: [learning, study, quiz, education]
+python_dependencies:
+  - "pypdf>=5.0,<7"
+provides_tools:
+  - study_make_course
+  - study_courses
+  - study_lesson
+  - study_question
+  - study_answer
+  - study_explain_back
+config_schema:
+  reducto_key: {type: secret, env: REDUCTO_API_KEY, label: "Reducto key (optional)", description: "Reads PDFs and scans. Without it, PDFs are read on this computer."}
+  pangram_key: {type: secret, env: PANGRAM_API_KEY, label: "Pangram key (optional)", description: "Says whether an explanation reads as AI-written. A signal, never proof. Without it, that check is off."}
+  modal_url: {type: str, default: "", label: "Modal voice address (optional)", description: "The address `modal deploy voice/modal_speech.py` prints, on your own Modal account. Without it, this computer's voice reads lessons."}
+  modal_token: {type: secret, env: MODAL_SPEECH_TOKEN, label: "Modal voice token", description: "The SPEECH_TOKEN you chose when you deployed it."}
+  voice: {type: str, default: "af_heart", label: "Modal voice", description: "A Kokoro voice name."}
+  reducto_url: {type: str, default: "https://platform.reducto.ai", label: "Reducto address", description: "Only change this for a proxy of your own."}
+  pangram_url: {type: str, default: "https://text.external-api.pangram.com", label: "Pangram address", description: "Only change this for a proxy of your own."}

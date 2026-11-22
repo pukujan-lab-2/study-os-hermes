@@ -1,0 +1,327 @@
+"""Runs the whole engine on a throwaway database with a pretend model: python -m unittest discover -s tests"""
+
+import io
+import json
+import os
+import sys
+import tempfile
+import threading
+import time
+import unittest
+import zipfile
+from datetime import datetime, timedelta, timezone
+from http.server import BaseHTTPRequestHandler, HTTPServer
+from pathlib import Path
+from types import SimpleNamespace
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from engine import courses, ingest, llm, mastery, quiz, services, store  # noqa: E402
+
+QUIZ = {
+    "objectives": [
+        {
+            "label": f"Explain idea {n}",
+            "questions": [
+                {"kind": "choice", "difficulty": d, "prompt": f"Q{n} {d}?", "answer": "right", "hint": "think", "explanation": "because", "options": [{"text": "right", "correct": True, "why": "yes"}, {"text": "wrong one", "correct": False, "why": "mix-up"}, {"text": "other", "correct": False, "why": "no"}]}
+                for d in ("recall", "understand")
+            ]
+            + [{"kind": "blank", "difficulty": "apply", "prompt": f"Idea {n} is ___.", "options": [], "answer": "osmosis", "hint": "o", "explanation": "e"}],
+        }
+        for n in (1, 2)
+    ],
+    "terms": [{"term": "Osmosis", "definition": "Water moving."}],
+    "visual": {"kind": "flow", "title": "Steps", "items": [{"label": "One"}, {"label": "Two", "points": ["a"]}]},
+}
+
+
+class FakeModel:
+    def __init__(self):
+        self.calls, self.fail_lesson, self.bodies = [], 0, 0
+
+    def complete(self, messages, **k):
+        self.calls.append(("text", messages[-1]["content"]))
+        if self.fail_lesson:
+            self.fail_lesson -= 1
+            raise RuntimeError("429 rate limit")
+        self.bodies += 1
+        return SimpleNamespace(text=f"# Title\n\n### Why\n\nBody {self.bodies}.\n\n> **Compare it to cooking:** like soup.\n\n### Then\n\nMore.")
+
+    def complete_structured(self, *, instructions, input, json_schema, **k):
+        self.calls.append(("data", instructions[:40]))
+        req = json_schema["required"]
+        if "sections" in req:
+            parts = input[0]["text"].count("<part number")
+            out = {"title": "Osmosis", "subject": "Biology", "summary": "Explain it.", "sections": [{"number": i + 1, "title": f"Part {i + 1}", "goal": "Explain", "skip": parts > 2 and i == 0} for i in range(parts or 3)]}
+        elif "objectives" in req:
+            out = QUIZ
+        else:
+            out = {"goals": [{"number": 1, "score": 0.9}, {"number": 2, "score": 0}], "got": ["the idea"], "missing": ["why"], "next_question": "Why?"}
+        return SimpleNamespace(parsed=None, text="Sure!\n```json\n" + json.dumps(out) + "\n```")
+
+
+class Case(unittest.TestCase):
+    def setUp(self):
+        self.dir = tempfile.TemporaryDirectory()
+        os.environ["STUDYOS_SOLO_DB"] = os.path.join(self.dir.name, "t.db")
+        for k in ("REDUCTO_API_KEY", "PANGRAM_API_KEY", "MODAL_SPEECH_TOKEN"):
+            os.environ.pop(k, None)
+        self.model = FakeModel()
+        llm.use(self.model)
+
+    def tearDown(self):
+        time.sleep(0.05)
+        self.dir.cleanup()
+
+    def wait(self, cid, until=lambda c: c["status"] in ("ready", "failed"), seconds=8):
+        end = time.time() + seconds
+        while time.time() < end:
+            c = courses.get(cid)
+            if until(c):
+                return c
+            time.sleep(0.02)
+        self.fail(f"still {c['status']}")
+
+    def made(self, **k):
+        return self.wait(courses.create(topic="osmosis", **k))
+
+
+class Building(Case):
+    def test_a_topic_becomes_a_course_with_lessons_and_quizzes(self):
+        c = self.made()
+        self.assertEqual((c["title"], c["status"], len(c["list"])), ("Osmosis", "ready", 3))
+        s = c["list"][0]
+        self.assertTrue(s["body"].startswith("### Why"))
+        self.assertNotIn("Compare it to", s["body"])  # nobody asked for one
+        self.assertEqual(len(s["goals"]), 2)
+        self.assertEqual(s["visual"]["kind"], "flow")
+
+    def test_material_is_split_taught_in_order_and_its_front_matter_skipped(self):
+        text = "\n\n".join(f"# Part {i}\n\n" + ("Cells take in water. " * 220) for i in range(4))
+        cid = courses.create(material=text, name="cells.pdf")
+        c = self.wait(cid)
+        self.assertEqual(c["source_name"], "cells.pdf")
+        self.assertEqual(len(c["list"]), 3)
+        self.assertTrue(all(s["from_material"] for s in c["list"]))
+        self.assertTrue(any("<source>" in t for k, t in self.model.calls if k == "text"))
+
+    def test_too_little_to_go_on_is_refused(self):
+        with self.assertRaises(courses.Problem):
+            courses.create(material="short")
+
+    def test_a_failed_section_leaves_the_rest_and_a_retry_finishes_it(self):
+        self.model.fail_lesson = 2  # one lesson, both tries
+        c = self.made()
+        self.assertEqual(c["status"], "ready")
+        self.assertEqual(sum(s["status"] == "failed" for s in c["list"]), 1)
+        self.assertIn("rate limited", next(s["error"] for s in c["list"] if s["error"]))
+        courses.retry(c["id"])
+        c = self.wait(c["id"], lambda c: all(s["status"] == "ready" for s in c["list"]) and c["status"] == "ready")
+        self.assertIsNone(c["error"])
+
+    def test_a_build_left_by_a_closed_app_is_picked_up_and_a_live_one_is_not(self):
+        c = self.made()
+        store.run("update sections set status = 'writing', body = null where id = ?", c["list"][0]["id"])
+        store.run("update courses set status = 'writing', owner = 'gone', heartbeat = ? where id = ?", store.now(), c["id"])
+        self.assertFalse(courses.start(c["id"]))
+        old = (datetime.now(timezone.utc) - timedelta(minutes=5)).isoformat(timespec="seconds")
+        store.run("update courses set heartbeat = ? where id = ?", old, c["id"])
+        self.wait(c["id"])
+        self.assertEqual(len(courses.get(c["id"])["list"][0]["goals"]), 2)  # its quiz wasn't written twice
+
+
+class Asking(Case):
+    def test_a_miss_gets_one_more_try_then_counts_and_comes_back_soon(self):
+        c = self.made()
+        q = quiz.next_question(course_id=c["id"])
+        self.assertNotIn("correct", json.dumps(q))
+        opts = store.loads(store.row("select options from questions where id = ?", q["id"])["options"], [])
+        wrong = next(i for i, o in enumerate(opts) if not o["correct"])
+        r = quiz.answer(q["id"], option=wrong)
+        self.assertFalse(r["final"])
+        self.assertIn(r["why"], ("mix-up", "no"))
+        r = quiz.answer(q["id"], option=wrong, tries=2)
+        self.assertTrue(r["final"])
+        self.assertEqual(r["mastery_after"], 0)  # a miss never looks like progress
+        self.assertLess(r["next_review"], (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat())
+
+    def test_right_answers_raise_mastery_and_every_question_is_asked_once(self):
+        c = self.made()
+        asked, sid = [], c["list"][0]["id"]
+        while q := quiz.next_question(section_id=sid, asked=asked):
+            asked.append(q["id"])
+            row = store.row("select options, answer from questions where id = ?", q["id"])
+            opts = store.loads(row["options"], [])
+            r = quiz.answer(q["id"], option=next((i for i, o in enumerate(opts) if o["correct"]), None), text="Osmosis!")
+            self.assertTrue(r["correct"])
+        self.assertEqual(len(asked), 6)
+        self.assertEqual(courses.get(c["id"])["mastered"], 2)  # clean answers at every difficulty
+        self.assertEqual(quiz.streak()["days"], 1)
+
+    def test_only_due_goals_come_up_for_review(self):
+        c = self.made()
+        self.assertIsNone(quiz.next_question(due_only=True))
+        o = store.row("select id from objectives where course_id = ?", c["id"])
+        store.run("update objectives set next_review = ? where id = ?", "2000-01-01T00:00:00+00:00", o["id"])
+        self.assertEqual(quiz.progress()["due"], 1)
+        self.assertIsNotNone(quiz.next_question(due_only=True))
+
+    def test_fill_ins_forgive_slips_not_wrong_words(self):
+        for said in ("osmosis", " Osmosis. ", "the osmosis", "osmossis"):
+            self.assertTrue(quiz.blank_right("osmosis", said), said)
+        for said in ("diffusion", "", "o"):
+            self.assertFalse(quiz.blank_right("osmosis", said), said)
+
+    def test_questions_that_cannot_be_marked_fairly_are_dropped(self):
+        two = [{"text": "a", "correct": True}, {"text": "b", "correct": True}, {"text": "c", "correct": False}]
+        self.assertIsNone(courses.clean_question({"kind": "choice", "prompt": "?", "options": two}))
+        self.assertIsNone(courses.clean_question({"kind": "blank", "prompt": "no gap", "answer": "x"}))
+
+    def test_explaining_back_moves_only_the_goals_it_shows(self):
+        c = self.made()
+        s = c["list"][0]
+        r = quiz.explain_back(s["id"], "Water moves through a thin skin to where there is more salt in it.", lambda t: {"label": "Human", "ai": 0, "assisted": 0, "human": 1})
+        self.assertEqual(r["authorship"]["label"], "Human")
+        g = courses.get(c["id"])["list"][0]["goals"]
+        self.assertEqual([x["started"] for x in g], [True, False])
+
+        def down(_t):
+            raise services.ServiceError("no")
+
+        self.assertEqual(quiz.explain_back(s["id"], "Water moves through a thin skin to where there is more salt.", down)["authorship"], None)
+        with self.assertRaises(courses.Problem):
+            quiz.explain_back(s["id"], "too short")
+
+
+class Rewording(Case):
+    def test_preview_use_and_switch_back(self):
+        c = self.made()
+        s = c["list"][0]
+        courses.preview(s["id"], {"level": 8, "compare_to": "cooking", "ask": "simpler"})
+        end = time.time() + 5
+        while not (w := courses.wordings(s["id"]))["draft"] and time.time() < end:
+            time.sleep(0.02)
+        self.assertEqual(w["draft"]["body"].count("Compare it to cooking"), 1)
+        self.assertEqual(courses.get(c["id"])["list"][0]["body"], s["body"])  # nothing changes until it's used
+        courses.use_version(s["id"])
+        now = courses.get(c["id"])["list"][0]
+        self.assertEqual((now["how"]["level"], now["goals"]), (8, s["goals"]))
+        e = courses.wordings(s["id"])["earlier"]
+        courses.use_version(s["id"], e[0]["id"])
+        self.assertEqual(courses.get(c["id"])["list"][0]["body"], s["body"])
+
+
+class Mastery(unittest.TestCase):
+    def test_ladder(self):
+        now = datetime(2026, 1, 1, tzinfo=timezone.utc)
+        st = {"alpha": 1, "beta": 1, "streak": 0}
+        gaps = []
+        for _ in range(4):
+            st = mastery.apply_answer(st, score=1, difficulty="apply", now=now)
+            gaps.append((datetime.fromisoformat(st["next_review"]) - now).days)
+        self.assertEqual(gaps, [1, 3, 7, 16])
+        self.assertTrue(mastery.is_mastered(st["alpha"], st["beta"]))
+        self.assertEqual(mastery.apply_answer(st, score=0, now=now)["streak"], 0)
+
+
+class Services(Case):
+    """Reducto, Pangram and Modal, against a local server that answers in their shapes."""
+
+    def setUp(self):
+        super().setUp()
+        seen = self.seen = []
+
+        class H(BaseHTTPRequestHandler):
+            def log_message(self, *a):
+                pass
+
+            def send(self, body, ctype="application/json", **h):
+                self.send_response(200)
+                self.send_header("Content-Type", ctype)
+                for k, v in h.items():
+                    self.send_header(k.replace("_", "-"), v)
+                self.end_headers()
+                self.wfile.write(body if isinstance(body, bytes) else json.dumps(body).encode())
+
+            def do_GET(self):
+                seen.append((self.path, dict(self.headers)))
+                if self.path == "/big":
+                    return self.send({"chunks": [{"content": "Cells and water. " * 40}]})
+                self.send({"stage": "STAGE_SUCCESS", "prediction_short": "AI", "fraction_ai": 0.9, "fraction_ai_assisted": 0.1, "fraction_human": 0})
+
+            def do_POST(self):
+                body = self.rfile.read(int(self.headers.get("Content-Length", 0)))
+                seen.append((self.path, dict(self.headers)))
+                if self.path == "/redirect":
+                    self.send_response(302)
+                    self.send_header("Location", "http://127.0.0.1:1/steal")
+                    self.end_headers()
+                elif self.path == "/upload":
+                    self.send({"file_id": "reducto://1"} if b"%PDF-" in body else {})
+                elif self.path == "/parse":
+                    self.send({"job_id": "j", "result": {"type": "url", "url": f"http://127.0.0.1:{self.server.server_port}/big"}})
+                elif self.path == "/task":
+                    self.send({"task_id": "t1", "stage": "STAGE_PENDING"})
+                elif self.path == "/tts":
+                    self.send(b"\x00\x01" * 2400, "audio/pcm", X_Sample_Rate="24000")
+
+        self.http = HTTPServer(("127.0.0.1", 0), H)
+        threading.Thread(target=self.http.serve_forever, daemon=True).start()
+        url = f"http://127.0.0.1:{self.http.server_port}"
+        os.environ.update(REDUCTO_API_KEY="rk", PANGRAM_API_KEY="pk", MODAL_SPEECH_TOKEN="mt", STUDYOS_SOLO_REDUCTO_URL=url, STUDYOS_SOLO_PANGRAM_URL=url, STUDYOS_SOLO_MODAL_URL=url)
+
+    def tearDown(self):
+        self.http.shutdown()
+        self.http.server_close()
+        for k in ("REDUCTO_API_KEY", "PANGRAM_API_KEY", "MODAL_SPEECH_TOKEN", "STUDYOS_SOLO_REDUCTO_URL", "STUDYOS_SOLO_PANGRAM_URL", "STUDYOS_SOLO_MODAL_URL"):
+            os.environ.pop(k, None)
+        super().tearDown()
+
+    def test_reducto_reads_a_pdf_and_its_key_goes_nowhere_else(self):
+        text, by = ingest.read("notes.pdf", b"%PDF-1.7 fake")
+        self.assertEqual(by, "Reducto")
+        self.assertIn("Cells and water", text)
+        by_path = dict(self.seen)
+        self.assertEqual(by_path["/parse"]["Authorization"], "Bearer rk")
+        self.assertNotIn("Authorization", by_path["/big"])
+
+    def test_pangram_waits_for_its_verdict(self):
+        self.assertEqual(services.pangram("some words"), {"label": "AI", "ai": 0.9, "assisted": 0.1, "human": 0.0})
+        self.assertEqual({k.lower(): v for k, v in self.seen[0][1].items()}["x-api-key"], "pk")
+
+    def test_modal_sound_becomes_a_wav(self):
+        import base64
+        import wave
+
+        a = services.speak("Hello")
+        with wave.open(io.BytesIO(base64.b64decode(a["audio"]))) as w:
+            self.assertEqual((w.getframerate(), w.getnframes()), (24000, 2400))
+
+    def test_without_keys_everything_stays_here(self):
+        os.environ.pop("MODAL_SPEECH_TOKEN")
+        os.environ.pop("REDUCTO_API_KEY")
+        self.assertEqual(services.speak("Hello"), {"local": True})
+        with self.assertRaises(courses.Problem):
+            ingest.read("notes.pdf", b"%PDF-1.7 fake")
+        self.assertEqual(self.seen, [])
+
+    def test_a_key_is_never_sent_in_the_clear_or_after_a_redirect(self):
+        with self.assertRaises(services.ServiceError):
+            services._safe("http://example.com")
+        with self.assertRaises(services.ServiceError):
+            services._http("POST", f"http://127.0.0.1:{self.http.server_port}/redirect", headers={"Authorization": "Bearer rk"}, body=b"x")
+
+
+class Files(Case):
+    def test_word_documents_and_text(self):
+        buf = io.BytesIO()
+        ns = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+        with zipfile.ZipFile(buf, "w") as z:
+            z.writestr("word/document.xml", f'<w:document xmlns:w="{ns}"><w:body><w:p><w:pPr><w:pStyle w:val="Heading1"/></w:pPr><w:r><w:t>Cells</w:t></w:r></w:p><w:p><w:r><w:t>Water moves.</w:t></w:r></w:p></w:body></w:document>')
+        self.assertEqual(ingest.read("a.docx", buf.getvalue())[0], "## Cells\n\nWater moves.")
+        self.assertEqual(ingest.read("a.md", b"hello")[0], "hello")
+        with self.assertRaises(courses.Problem):
+            ingest.read("a.bin", b"\x00\x01\x02")
+
+
+if __name__ == "__main__":
+    unittest.main()
