@@ -286,7 +286,7 @@ class Services(Case):
             def do_GET(self):
                 seen.append((self.path, dict(self.headers)))
                 if self.path == "/big":
-                    return self.send({"chunks": [{"content": "Cells and water. " * 40}]})
+                    return self.send({"chunks": [{"content": "Cells and water. " * 40, "blocks": [{"type": "Title", "content": "Cells", "bbox": {"left": 0.1, "top": 0.1, "width": 0.5, "height": 0.05, "page": 1}}, {"type": "Text", "content": "p2", "bbox": {"left": 0.1, "top": 0.1, "width": 0.5, "height": 0.05, "page": 2}}, {"type": "Text", "content": "bad", "bbox": {"left": "x"}}]}]})
                 self.send({"stage": "STAGE_SUCCESS", "prediction_short": "AI", "fraction_ai": 0.9, "fraction_ai_assisted": 0.1, "fraction_human": 0})
 
             def do_POST(self):
@@ -331,6 +331,7 @@ class Services(Case):
 
     def test_the_same_file_or_text_is_sent_only_once(self):
         a = ingest.read("notes.pdf", b"%PDF-1.7 fake")
+        self.assertEqual([b["text"] for b in services.blocks_of(b"%PDF-1.7 fake")], ["Cells"])
         n = len(self.seen)
         self.assertEqual(ingest.read("other name.pdf", b"%PDF-1.7 fake"), a)
         self.assertEqual(len(self.seen), n)

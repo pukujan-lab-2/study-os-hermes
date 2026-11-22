@@ -108,7 +108,7 @@ def save_upload(name: str, data: bytes) -> dict:
         raise Problem("There isn't enough text in that file to make a course.")
     uid = new_id()
     run("insert into uploads (id, name, text, read_by, created_at) values (?,?,?,?,?)", uid, name[:120], text, by, now())
-    return {"id": uid, "name": name[:120], "characters": len(text), "read_by": by}
+    return {"id": uid, "name": name[:120], "characters": len(text), "read_by": by, "blocks": services.blocks_of(data)}
 
 
 SAMPLES = {

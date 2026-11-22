@@ -303,6 +303,11 @@ class Mail(BaseModel):
     body: str = Field("", max_length=4000)
 
 
+@router.post("/read")
+async def read_text(body: Text):
+    return await call(services.pangram, body.text)
+
+
 @router.post("/samples/{key}")
 async def sample(key: str):
     return await call(ingest.sample, key)

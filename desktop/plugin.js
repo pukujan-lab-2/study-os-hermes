@@ -454,7 +454,7 @@ function Listen({ ctx, section }) {
 
 /* ---- watch: the HyperFrames composition itself, played live -------------------------------------------------------- */
 
-function Film({ ctx, sid, kind }) {
+function Film({ ctx, sid, kind, auto }) {
   const { data: f, error } = useQuery({ queryKey: [ID, 'film', sid, kind], queryFn: () => ctx.rest(`/sections/${sid}/film/${kind}`), staleTime: Infinity })
   const frame = useRef(null)
   const box = useRef(null)
@@ -483,6 +483,8 @@ function Film({ ctx, sid, kind }) {
     window.addEventListener('message', ready)
     return () => { window.removeEventListener('message', ready); run.current++ }
   }, [f])
+  const began = useRef(false)
+  useEffect(() => { if (auto && f && scale > 0 && !began.current) { began.current = true; const t = setTimeout(() => play(0), 900); return () => clearTimeout(t) } }, [auto, f, scale > 0])
   const hold = i => starts[i] + f.scenes[i].duration - 0.45
   const halt = () => { run.current++; sp.stop(); setOn(false) }
   const tick = (mine, from, to) => new Promise(done => {
@@ -765,6 +767,133 @@ function Samples({ ctx, list, busy, onUse, onError }) {
   }
   return h('div.so-samples', h('span.so-label', 'Try a sample'), list.map(([k, label, kind]) => h('button', { key: k, type: 'button', disabled: !!at || busy, className: kind, onClick: () => use(k) }, h(Icon, { n: at === k ? 'spin' : kind === 'hand' ? 'cam' : 'file', size: 15 }), label)))
 }
+/* ---- showcase: one page in, the whole chain out ------------------------------------------------------------------------- */
+
+const pause = ms => new Promise(r => setTimeout(r, reduced() ? Math.min(ms, 120) : ms))
+function Paper({ blocks, shown, parts }) {
+  const kindOf = t => {
+    if (!parts) return ''
+    const flat = s => s.replace(/[^a-z0-9]+/gi, '').toLowerCase()
+    const k = flat(t)
+    const tries = [0.1, 0.5, 0.75].map(f => k.slice(Math.floor(k.length * f), Math.floor(k.length * f) + 26)).filter(x => x.length > 12)
+    const hit = parts.find(p => { const x = flat(p.text); return tries.some(y => x.includes(y)) })
+    return hit ? hit.kind : ''
+  }
+  return h('div.so-paper', blocks.map((b, i) => h('div', { key: i, className: cls('so-blk', i < shown && 'on', kindOf(b.text)), style: { left: `${b.x * 100}%`, top: `${b.y * 100}%`, width: `${b.w * 100}%`, minHeight: `${b.h * 100}%`, fontSize: /title|header/i.test(b.type) ? `${Math.min(3.1, Math.max(1.5, b.h * 62))}cqw` : `${Math.min(2.1, Math.max(0.9, Math.sqrt((b.w * b.h * 1.29) / Math.max(20, b.text.length)) * 122))}cqw` } }, b.text)))
+}
+const Step = ({ n, title, by, state, children }) => h('div', { className: cls('so-step', state) }, h('span.so-num', state === 'done' ? h(Icon, { n: 'check', size: 16 }) : state === 'now' ? h(Icon, { n: 'spin', size: 16 }) : n), h('div.so-grow', h('div.so-row', h('b', title), by && h('span.so-tag', by)), state !== 'wait' && children))
+function Showcase({ ctx, home, go }) {
+  const [up, setUp] = useState(null)
+  const [shown, setShown] = useState(0)
+  const [src, setSrc] = useState(null)
+  const [course, setCourse] = useState(null)
+  const [pop, setPop] = useState(0)
+  const [film, setFilm] = useState(null)
+  const [at, setAt] = useState(0)
+  const [secs, setSecs] = useState([])
+  const [error, setError] = useState(null)
+  const [over, setOver] = useState(false)
+  const run = useRef(0)
+  const pick = useRef(null)
+  useEffect(() => () => { run.current++ }, [])
+  const begin = async get => {
+    const mine = ++run.current
+    const ok = () => mine === run.current
+    setError(null); setUp(null); setShown(0); setSrc(null); setCourse(null); setPop(0); setFilm(null); setSecs([])
+    const took = t => setSecs(s => [...s, ((performance.now() - t) / 1000)])
+    try {
+      setAt(1)
+      let t = performance.now()
+      const u = await get()
+      if (!ok()) return
+      setUp(u)
+      for (let i = 0; i <= (u.blocks || []).length; i++) { setShown(i); await pause(150); if (!ok()) return }
+      took(t)
+      setAt(2)
+      t = performance.now()
+      const v = home.services.pangram ? await ctx.rest(`/uploads/${u.id}/check`, { method: 'POST', timeoutMs: 120000 }) : null
+      await pause(500)
+      if (!ok()) return
+      setSrc(v)
+      took(t)
+      await pause(1400)
+      if (v && v.ai > 0.5) { setAt(9); return }
+      setAt(3)
+      t = performance.now()
+      const made = await ctx.rest('/courses', { method: 'POST', body: { upload_id: u.id, how: { level: home.prefs.level, story: home.prefs.story, compare_to: home.prefs.compare_to } } })
+      let c
+      for (;;) { c = await ctx.rest(`/courses/${made.id}`); if (!ok()) return; setCourse(c); if (['ready', 'failed'].includes(c.status)) break; await pause(2000) }
+      for (let i = 0; i <= c.list.length; i++) { setPop(i); await pause(420); if (!ok()) return }
+      if (c.status === 'failed') throw new Error(c.error)
+      took(t)
+      setAt(4)
+      t = performance.now()
+      const s = c.list[0]
+      const find = async () => ((await ctx.rest(`/sections/${s.id}/media`)).media.find(m => m.kind === 'explainer'))
+      let m = await find()
+      if (!m || m.status !== 'ready') { await ctx.rest(`/sections/${s.id}/media`, { method: 'POST', body: { kind: 'explainer' } }); do { await pause(2000); if (!ok()) return; m = await find() } while (m && m.status === 'making') }
+      await pause(700)
+      if (!ok()) return
+      if (!m || m.status !== 'ready') throw new Error((m && m.error) || 'The video couldn’t be made.')
+      setFilm(s.id)
+      took(t)
+      setAt(5)
+      setTimeout(() => { const e = document.querySelector('.so-show .so-film'); if (e) e.scrollIntoView({ behavior: 'smooth', block: 'center' }) }, 500)
+    } catch (err) { if (ok()) { setError(msg(err)); setAt(0) } }
+  }
+  const sample = k => begin(async () => (await ctx.rest(`/samples/${k}`, { method: 'POST', timeoutMs: 300000 })).upload)
+  const drop = f => f && begin(() => f.arrayBuffer().then(b => ctx.rest('/upload', { method: 'POST', upload: { filename: f.name, contentType: f.type || 'application/pdf', bytes: new Uint8Array(b) }, timeoutMs: 300000 })))
+  const st = n => (at === 9 ? (n < 3 ? 'done' : 'wait') : at > n ? 'done' : at === n ? 'now' : 'wait')
+  const sec = i => (secs[i] !== undefined ? `${secs[i].toFixed(1)} s` : '')
+  return h('div.so-page.so-show',
+    h('header.so-hero.so-in', h('div.so-grow', h('div.so-eyebrow', 'From one page'), h('h1', 'Watch it ', h('em', 'work'))), at > 0 && h(Btn, { icon: 'redo', onClick: () => { run.current++; setAt(0); setUp(null) } }, 'Start over')),
+    error && h(Note, { bad: true }, error),
+    !at && h('div', { className: cls('so-drop so-bigdrop', over && 'over'), onDragOver: e => { e.preventDefault(); setOver(true) }, onDragLeave: () => setOver(false), onDrop: e => { e.preventDefault(); setOver(false); drop(e.dataTransfer.files[0]) } },
+      h('input', { ref: pick, type: 'file', hidden: true, accept: '.pdf', onChange: e => drop(e.target.files[0]) }),
+      h(Icon, { n: 'file', size: 54 }), h('h2', 'Drop a page'),
+      h('div.so-row', h(Btn, { kind: 'main', icon: 'file', onClick: () => sample('faraday') }, 'A real one: Faraday, 1861'), h(Btn, { icon: 'file', onClick: () => sample('ai-article') }, 'An AI-written article'), h(Btn, { onClick: () => pick.current.click() }, 'Choose a file'))),
+    at > 0 && h('div.so-showgrid',
+      h('div', up ? h(Paper, { blocks: up.blocks || [], shown, parts: src && src.parts }) : h('div.so-paper.so-empty2', h(Icon, { n: 'spin', size: 34 }))),
+      h('div.so-steps',
+        h(Step, { n: 1, title: 'Read the page', by: up ? up.read_by : 'Reducto', state: st(1) }, h('p.so-dim', up ? `${(up.blocks || []).length} blocks found` : 'Reading', sec(0) && ` · ${sec(0)}`)),
+        h(Step, { n: 2, title: 'Who wrote it?', by: 'Pangram', state: st(2) }, src ? [h(Mix, { key: 1, v: src }), h('p.so-dim', { key: 2 }, h('b', src.ai > 0.5 ? 'AI-written' : `${pct(src.human)}% human`), src.saved ? ' · saved result' : sec(1) && ` · ${sec(1)}`)] : h('p.so-dim', 'Checking part by part')),
+        at === 9
+          ? h('div.so-stop.so-in', h('h2', 'Stop. Nobody wrote this.'), h('p', 'Study OS tells you before you learn from it. You decide.'), h('div.so-row', h(Btn, { kind: 'main', onClick: () => sample('faraday') }, 'Try a real one'), h(Btn, { onClick: () => go('new') }, 'Use it anyway')))
+          : [
+              h(Step, { key: 3, n: 3, title: 'Make the course', by: 'Claude, in Hermes', state: st(3) }, course ? h('div.so-pops', h('b', course.title), course.list.map((s, i) => h('span', { key: s.id, className: cls(i < pop && 'on') }, h(Icon, { n: 'check', size: 14 }), s.title, h('em', `${s.goals.length} goals`)))) : h('p.so-dim', 'Planning')),
+              h(Step, { key: 4, n: 4, title: 'Make the video', by: 'HyperFrames', state: st(4) }, h('p.so-dim', film ? 'Ready' : 'Drawing the scenes')),
+              at === 5 && h('div.so-row.so-in', { key: 5 }, h(Btn, { kind: 'main', icon: 'book', onClick: () => go('course', course.id) }, 'Open the course'))
+            ])),
+    film && h('section.so-card.so-in', h(Film, { ctx, sid: film, kind: 'explainer', auto: true })),
+    h(AorB, { ctx }))
+}
+function AorB({ ctx }) {
+  const [sides, setSides] = useState(null)
+  const [pick, setPick] = useState(null)
+  const [read, setRead] = useState({})
+  const [error, setError] = useState(null)
+  const [busy, setBusy] = useState(false)
+  const deal = async () => {
+    setBusy(true); setPick(null); setRead({}); setError(null)
+    try {
+      const [p, a] = await Promise.all(['essay-person', 'essay-ai'].map(k => ctx.rest(`/samples/${k}`, { method: 'POST' })))
+      const two = [{ ai: false, text: p.text }, { ai: true, text: a.text }]
+      setSides(Math.random() < 0.5 ? two : two.reverse())
+    } catch (err) { setError(msg(err)) }
+    setBusy(false)
+  }
+  const guess = async i => {
+    setPick(i)
+    try { const r = await Promise.all(sides.map(s => ctx.rest('/read', { method: 'POST', body: { text: s.text }, timeoutMs: 90000 }))); await pause(700); setRead(r) } catch (err) { setError(msg(err)) }
+  }
+  return h('section.so-card.so-ab',
+    h('div.so-row', h('h2.so-grow', pick === null ? 'A or B: which one did AI write?' : sides[pick].ai ? 'You got it' : 'That one was a person'), h(Btn, { kind: sides ? 'quiet' : 'main', icon: sides ? 'redo' : 'play', disabled: busy, onClick: deal }, sides ? 'Again' : 'Play')),
+    error && h(Note, { bad: true }, error),
+    sides && h('div.so-cols2', sides.map((s, i) => h('div.so-in', { key: `${i}${s.ai}`, className: cls('so-abside so-in', pick !== null && read[i] && (s.ai ? 'model' : 'mine')) },
+      h('div.so-row', h('span.so-optn', 'AB'[i]), pick !== null && read[i] && h('b', s.ai ? 'AI' : 'Michael Faraday, 1861'), h('span.so-grow'), pick === null && h(Btn, { onClick: () => guess(i) }, 'This is AI')),
+      read[i] ? [h(Mix, { key: 1, v: read[i] }), h(Painted, { key: 2, v: read[i] })] : [pick !== null && h('div.so-scanbar', { key: 1 }, h('i')), h('p', { key: 2 }, s.text)]))))
+}
+
 /* ---- class: shared pieces --------------------------------------------------------------------------------------- */
 
 const openLink = (ctx, url) => { if (ctx.os && ctx.os.openExternal) ctx.os.openExternal(url); else window.open(url, '_blank') }
@@ -1248,6 +1377,7 @@ function Page({ ctx }) {
   if (error && !home) body = h('div.so-page', h('div.so-card.so-empty', h('h2', 'Study OS isn’t running yet'), h('p.so-dim', 'Turn on its agent half: run “hermes plugins enable study-os-solo”, then restart the gateway.'), h('p.so-dim', msg(error)), h(Btn, { kind: 'main', onClick: () => refetch() }, 'Try again')))
   else if (!home) body = h('div.so-page', h('div.so-skel'), h('div.so-skel'))
   else if (name === 'new') body = h(NewCourse, { ctx, home, go })
+  else if (name === 'show') body = h(Showcase, { ctx, home, go })
   else if (name === 'setup') body = h(Setup, { ctx, home, go })
   else if (name === 'class') body = h(ClassPage, { ctx })
   else if (name === 'essay') body = h(Essay, { ctx, home })
@@ -1257,7 +1387,7 @@ function Page({ ctx }) {
   else body = h(Home, { home, go })
   return h('div.so-root', { className: cls('so-root', look) },
     h('div.so-top', h('button.so-logo', { type: 'button', onClick: () => go('home') }, 'Study', h('em', 'os')),
-      h('nav', { 'aria-label': 'Study OS' }, [['home', 'Courses'], ['known', 'What you know'], ['essay', 'Essay check'], ['class', 'Class']].map(([k, t]) => h('button', { key: k, type: 'button', 'aria-current': name === k ? 'page' : undefined, onClick: () => go(k) }, t)), home && home.due > 0 && h('button', { type: 'button', 'aria-current': name === 'review' ? 'page' : undefined, onClick: () => go('review') }, 'Review', h('span.so-badge', home.due))),
+      h('nav', { 'aria-label': 'Study OS' }, [['home', 'Courses'], ['show', 'Showcase'], ['known', 'What you know'], ['essay', 'Essay check'], ['class', 'Class']].map(([k, t]) => h('button', { key: k, type: 'button', 'aria-current': name === k ? 'page' : undefined, onClick: () => go(k) }, t)), home && home.due > 0 && h('button', { type: 'button', 'aria-current': name === 'review' ? 'page' : undefined, onClick: () => go('review') }, 'Review', h('span.so-badge', home.due))),
       h('span.so-grow'), h(IconBtn, { icon: 'sliders', label: 'Set up', onClick: () => go('setup') }), h(IconBtn, { icon: 'look', label: 'Change the look', onClick: () => { const n = { sticker: 'studio', studio: 'hermes', hermes: 'sticker' }[look] || 'sticker'; setLook(n); if (ctx.storage) ctx.storage.set('look', n) } }), h(Btn, { kind: 'main', icon: 'plus', onClick: () => go('new') }, 'New')),
     h('div.so-body', { key: `${name}:${view.id || ''}` }, body))
 }
@@ -1372,7 +1502,7 @@ const LOOKS = `
 .so-signals{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px}.so-big2{display:block;font-size:44px;line-height:1.05;letter-spacing:-.04em;font-weight:780;margin-bottom:8px}.so-big2 span{font-size:16px;letter-spacing:0;font-weight:500;color:var(--so-3)}.so-spark{display:block;width:100%;height:40px}.so-spark path{fill:color-mix(in srgb,var(--so-a) 30%,transparent);stroke:var(--so-a);stroke-width:2;vector-effect:non-scaling-stroke}.so-spark .bad{fill:color-mix(in srgb,var(--so-bad) 25%,transparent);stroke:var(--so-bad)}.so-mid{font-size:clamp(30px,5cqw,48px)!important}.so-pts{width:74px!important;text-align:center;padding:7px!important}.so-ans{white-space:pre-wrap;margin-top:12px!important;line-height:1.7}
 .so-grid{border-collapse:separate;border-spacing:0;width:100%;margin-top:14px}.so-grid th{text-align:left;font-weight:500;padding:9px 14px 9px 0;vertical-align:middle}.so-grid thead b,.so-grid thead .so-dim{display:block;max-width:190px}.so-grid td{padding:6px 14px 6px 0}.so-grid tbody tr>*{border-top:1px solid color-mix(in srgb,var(--so-ink) 12%,transparent)}.so-grid tbody th{display:flex;gap:11px;align-items:center;font-weight:600}.so-face{display:grid;place-items:center;width:34px;height:34px;border-radius:99px;background:#f39ac3;color:#121212;border:1.5px solid var(--so-line);font-weight:700}.so-grid tr:nth-child(2n) .so-face{background:#8f9cff}.so-grid tr:nth-child(3n) .so-face{background:#ffc93c}.so-dot2{display:block;width:16px;height:16px;border-radius:99px;border:1.5px dashed var(--so-3)}.so-dot2.half{border-style:solid;background:linear-gradient(90deg,var(--so-a) 50%,transparent 0)}.so-dot2.late{border:1.5px solid var(--so-bad)}.so-cell{display:inline-flex!important;gap:10px;align-items:center;padding:8px 14px!important;border-radius:12px;border:1.5px solid var(--so-line)!important;background:var(--so-card)!important;font-size:13px;font-weight:600}.so-cell:hover{box-shadow:3px 3px 0 var(--so-line)}.so-cell.back{opacity:.75}.so-qs{margin-top:14px;list-style:decimal}
 @container (max-width:780px){.so-signals{grid-template-columns:1fr}.so-cal{grid-template-columns:repeat(7,minmax(44px,1fr))}.so-day{min-height:58px;padding:5px}.so-day i{font-size:0;height:8px;padding:0}.so-when{width:auto}}
-.so-game{width:100%;aspect-ratio:16/10;margin-top:16px;border-radius:20px;overflow:hidden;border:1.5px solid var(--so-line);background:#faf8f3}.so-root.sticker .so-game{box-shadow:5px 5px 0 #121212}.so-game:fullscreen{border-radius:0;border:0}.so-levels{display:flex;gap:6px}.so-levels i{display:grid;place-items:center;width:28px;height:28px;border-radius:99px;border:1.5px solid var(--so-line);font-style:normal;font-size:12px;font-weight:700;transition:background .3s}.so-levels .on{background:var(--so-good);color:#fff}@container (max-width:520px){.so-game{aspect-ratio:9/13}}.so-scanbar{height:12px;border-radius:9px;margin-top:8px;overflow:hidden;background:color-mix(in srgb,var(--so-ink) 10%,transparent)}.so-scanbar i{display:block;height:100%;background:linear-gradient(90deg,var(--so-a),#d7322a);animation:so-scan .9s cubic-bezier(.4,0,.2,1) both}@keyframes so-scan{from{width:0}to{width:100%}}.so-mix i{animation:so-grow .9s var(--so-ease) both;transform-origin:0 50%}@keyframes so-grow{from{transform:scaleX(0)}}.so-painted span{animation:so-paint .5s ease both;animation-delay:calc(var(--i,0)*70ms)}@keyframes so-paint{from{background-color:transparent;box-shadow:none}}.so-setup{display:grid;grid-template-columns:1fr 1.5fr;gap:18px;align-items:start}.so-setup .here{display:flex!important;flex-direction:column;gap:14px;align-items:flex-start}.so-root.sticker .so-setup .here{background:#ffc93c}.so-svc{display:flex;gap:14px;align-items:center;padding:14px 0;border-top:1px solid color-mix(in srgb,var(--so-ink) 14%,transparent)}.so-svc:first-of-type{margin-top:14px}.so-svc b,.so-svc .so-dim{display:block}.so-dotbig{display:grid;place-items:center;width:40px;height:40px;border-radius:99px;border:1.5px solid var(--so-line);flex:none}.so-svc.on .so-dotbig{background:var(--so-good);color:#fff;border-color:transparent}@container (max-width:780px){.so-setup{grid-template-columns:1fr}}.so-samples{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:14px}.so-samples .so-label{margin:0 4px 0 0}.so-samples button{display:inline-flex;gap:8px;align-items:center;padding:7px 14px;border-radius:99px;border:1.5px dashed var(--so-line);font-size:13px;font-weight:600;transition:background .2s}.so-samples button:hover:not(:disabled){border-style:solid}.so-samples .ai svg{color:var(--so-bad)}.so-samples .hu svg{color:var(--so-good)}.so-talkgrid{display:grid;grid-template-columns:minmax(0,1.35fr) minmax(0,1fr);gap:18px;align-items:start}.so-talkgrid.solo{grid-template-columns:1fr}@container (max-width:900px){.so-talkgrid{grid-template-columns:1fr}}
+.so-game{width:100%;aspect-ratio:16/10;margin-top:16px;border-radius:20px;overflow:hidden;border:1.5px solid var(--so-line);background:#faf8f3}.so-root.sticker .so-game{box-shadow:5px 5px 0 #121212}.so-game:fullscreen{border-radius:0;border:0}.so-levels{display:flex;gap:6px}.so-levels i{display:grid;place-items:center;width:28px;height:28px;border-radius:99px;border:1.5px solid var(--so-line);font-style:normal;font-size:12px;font-weight:700;transition:background .3s}.so-levels .on{background:var(--so-good);color:#fff}@container (max-width:520px){.so-game{aspect-ratio:9/13}}.so-scanbar{height:12px;border-radius:9px;margin-top:8px;overflow:hidden;background:color-mix(in srgb,var(--so-ink) 10%,transparent)}.so-scanbar i{display:block;height:100%;background:linear-gradient(90deg,var(--so-a),#d7322a);animation:so-scan .9s cubic-bezier(.4,0,.2,1) both}@keyframes so-scan{from{width:0}to{width:100%}}.so-mix i{animation:so-grow .9s var(--so-ease) both;transform-origin:0 50%}@keyframes so-grow{from{transform:scaleX(0)}}.so-painted span{animation:so-paint .5s ease both;animation-delay:calc(var(--i,0)*70ms)}@keyframes so-paint{from{background-color:transparent;box-shadow:none}}.so-setup{display:grid;grid-template-columns:1fr 1.5fr;gap:18px;align-items:start}.so-setup .here{display:flex!important;flex-direction:column;gap:14px;align-items:flex-start}.so-root.sticker .so-setup .here{background:#ffc93c}.so-svc{display:flex;gap:14px;align-items:center;padding:14px 0;border-top:1px solid color-mix(in srgb,var(--so-ink) 14%,transparent)}.so-svc:first-of-type{margin-top:14px}.so-svc b,.so-svc .so-dim{display:block}.so-dotbig{display:grid;place-items:center;width:40px;height:40px;border-radius:99px;border:1.5px solid var(--so-line);flex:none}.so-svc.on .so-dotbig{background:var(--so-good);color:#fff;border-color:transparent}@container (max-width:780px){.so-setup{grid-template-columns:1fr}}.so-showgrid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:26px;align-items:start}.so-paper{container-type:inline-size;position:relative;aspect-ratio:8.5/11;max-height:640px;width:100%;max-width:495px;margin:0 auto;background:#fffef9;color:#26241f;border:1.5px solid var(--so-line);border-radius:10px;overflow:hidden;box-shadow:6px 6px 0 var(--so-line)}.so-empty2{display:grid;place-items:center;color:#2f3cdc}.so-blk{position:absolute;font-family:Georgia,serif;line-height:1.28;border-radius:4px;opacity:.12;transition:opacity .35s,background .6s,box-shadow .35s;overflow:hidden}.so-blk.on{opacity:1;box-shadow:0 0 0 1.5px #2f3cdc}.so-blk.human{background:rgb(23 111 61/.16);box-shadow:0 0 0 1.5px #176f3d}.so-blk.ai{background:rgb(204 43 34/.2);box-shadow:0 0 0 1.5px #cc2b22}.so-blk.assisted{background:rgb(242 160 61/.25);box-shadow:0 0 0 1.5px #f2a03d}.so-steps{display:flex;flex-direction:column;gap:12px}.so-step{display:flex;gap:16px;padding:18px 20px;border:1.5px solid var(--so-line);border-radius:18px;background:var(--so-card);transition:opacity .3s,transform .3s var(--so-ease)}.so-step.wait{opacity:.35}.so-step.now{box-shadow:5px 5px 0 var(--so-line);transform:translate(-2px,-2px)}.so-step b{font-size:17px}.so-step .so-mix{margin:10px 0 6px}.so-step.done .so-num{background:var(--so-good);color:#fff;border-color:transparent}.so-step .so-num{width:30px;height:30px}.so-pops{display:flex;flex-direction:column;gap:7px;margin-top:8px}.so-pops span{display:flex;gap:9px;align-items:center;opacity:0;transform:translateX(-10px);transition:opacity .35s,transform .35s var(--so-ease)}.so-pops .on{opacity:1;transform:none}.so-pops svg{color:var(--so-good)}.so-pops em{font-style:normal!important;font-family:'SO Mono',monospace!important;font-size:11px;color:var(--so-3)!important;margin-left:auto}.so-bigdrop{padding:70px 30px;background:var(--so-card)}.so-bigdrop .so-row{justify-content:center}.so-root.sticker .so-bigdrop{box-shadow:6px 6px 0 #121212;border-style:dashed!important}.so-bigdrop h2{font-size:34px;text-transform:uppercase;letter-spacing:-.04em}.so-stop{padding:26px;border:1.5px solid var(--so-line);border-radius:20px;background:#cc2b22;color:#fff;box-shadow:6px 6px 0 #121212}.so-stop h2{font-size:30px;text-transform:uppercase;letter-spacing:-.04em;margin-bottom:8px}.so-stop .so-row{margin-top:16px}.so-stop .so-btn{color:#121212}.so-stop .so-primary{color:#fff}.so-ab .so-abside .so-mix{margin-top:12px}@container (max-width:780px){.so-showgrid{grid-template-columns:1fr}}.so-samples{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:14px}.so-samples .so-label{margin:0 4px 0 0}.so-samples button{display:inline-flex;gap:8px;align-items:center;padding:7px 14px;border-radius:99px;border:1.5px dashed var(--so-line);font-size:13px;font-weight:600;transition:background .2s}.so-samples button:hover:not(:disabled){border-style:solid}.so-samples .ai svg{color:var(--so-bad)}.so-samples .hu svg{color:var(--so-good)}.so-talkgrid{display:grid;grid-template-columns:minmax(0,1.35fr) minmax(0,1fr);gap:18px;align-items:start}.so-talkgrid.solo{grid-template-columns:1fr}@container (max-width:900px){.so-talkgrid{grid-template-columns:1fr}}
 @media (prefers-reduced-motion:reduce){.so-stroke{stroke-dashoffset:0}.so-tint{opacity:.2}.so-ink{clip-path:none}}
 `
 

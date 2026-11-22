@@ -43,11 +43,11 @@ def clean(html: str) -> str:
 
 def make(s: dict, goals: list[str]) -> dict:
     ask = f"{prompts.learner({'level': s['level'], 'story': 'plain', 'compare_to': ''})}\n\n<lesson course=\"{s['course']}\" title=\"{s['title']}\">\n{s['body'][:5000]}\n</lesson>\nGoals:\n" + "\n".join(f"- {g}" for g in goals)
-    html = clean(llm.text(RULES, ask, max_tokens=16000, purpose="game", slow=True))
+    html = clean(llm.text(RULES, ask, max_tokens=14000, purpose="game", wait=420))
     t = re.search(r"<title>([^<]{2,80})</title>", html, flags=re.I)
     return {"title": (t.group(1).strip() if t else s["title"]), "html": html}
 
 
 def fix(html: str, error: str) -> str:
     bare = html.replace(GUARD, "")
-    return clean(llm.text(RULES, f"This game stops with an error: {error[:200]}\nReturn the whole corrected document.\n\n{bare}", max_tokens=16000, purpose="game", slow=True))
+    return clean(llm.text(RULES, f"This game stops with an error: {error[:200]}\nReturn the whole corrected document.\n\n{bare}", max_tokens=14000, purpose="game", wait=420))

@@ -12,10 +12,10 @@ TASK = "study_os_solo"  # its own row in Hermes' auxiliary models: low thinking,
 _task_ok = True
 
 
-def _call(fn, slow: bool = False, **k):
+def _call(fn, **k):
     """One model call, on this plugin's own Hermes task when it is registered here."""
     global _task_ok
-    if _task_ok and not slow:
+    if _task_ok:
         try:
             return fn(task=TASK, **k)
         except Exception as err:  # noqa: BLE001
@@ -57,10 +57,10 @@ def _explain(err: Exception) -> str:
     return f"The model didn't answer: {t[:160]}"
 
 
-def text(system: str, user: str, *, max_tokens: int = 7000, purpose: str = "lesson", slow: bool = False) -> str:
+def text(system: str, user: str, *, max_tokens: int = 7000, purpose: str = "lesson", wait: int = 240) -> str:
     for attempt in range(2):
         try:
-            r = _call(_get().complete, slow=slow, messages=[{"role": "system", "content": system}, {"role": "user", "content": user}], max_tokens=max_tokens, timeout=400 if slow else 240, purpose=f"study-os-solo.{purpose}")
+            r = _call(_get().complete, messages=[{"role": "system", "content": system}, {"role": "user", "content": user}], max_tokens=max_tokens, timeout=wait, purpose=f"study-os-solo.{purpose}")
             out = strip_fence(r.text or "")
             if out.strip():
                 return out

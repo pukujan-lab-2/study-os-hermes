@@ -6,6 +6,7 @@ from __future__ import annotations
 import io
 import json
 import os
+import re
 import time
 import urllib.error
 import urllib.request
@@ -89,7 +90,7 @@ def reducto(data: bytes, name: str, mime: str = "application/pdf") -> str:
     if not key:
         raise ServiceError("No Reducto key.")
     known = store.saved_key("reducto", data)
-    if old := store.recall(known):  # the same file is never sent, or paid for, twice
+    if (old := store.recall(known)) and store.recall(store.saved_key("blocks", data)) is not None:  # the same file is never sent, or paid for, twice
         return old
     base, auth = _safe(setting("reducto_url", REDUCTO)), {"Authorization": f"Bearer {key}"}
     mark = uuid.uuid4().hex
@@ -107,7 +108,30 @@ def reducto(data: bytes, name: str, mime: str = "application/pdf") -> str:
     text = "\n\n".join(c.get("content", "") for c in result.get("chunks") or []).strip()
     if text:
         store.remember(known, text)
+        store.remember(store.saved_key("blocks", data), _blocks(result))
     return text
+
+
+def _blocks(result: dict) -> list[dict]:
+    """Where each thing sat on the first page, for showing what was read."""
+    out = []
+    for c in result.get("chunks") or []:
+        for b in c.get("blocks") or []:
+            box = b.get("bbox") or {}
+            try:
+                if int(box.get("page") or 1) != 1:
+                    continue
+                x, y, w, h = (round(max(0.0, min(1.0, float(box[k]))), 4) for k in ("left", "top", "width", "height"))
+            except (KeyError, TypeError, ValueError):
+                continue
+            t = re.sub(r"<[^>]{1,20}>", "", str(b.get("content") or "")).strip()
+            if t and w > 0.01 and h > 0.004:
+                out.append({"type": str(b.get("type") or "Text")[:24], "text": t[:1600], "x": x, "y": y, "w": w, "h": h})
+    return out[:40]
+
+
+def blocks_of(data: bytes) -> list[dict]:
+    return store.recall(store.saved_key("blocks", data)) or []
 
 
 # ---- Pangram: how a text reads -------------------------------------------------------------------------------
