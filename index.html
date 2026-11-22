@@ -50,6 +50,7 @@ header{display:flex;justify-content:space-between;align-items:center;padding:20p
 .ab.me p span{background:#cfe9d9;box-shadow:inset 0 -2px 0 var(--green)}
 .ab p span{-webkit-box-decoration-break:clone;box-decoration-break:clone;transition:background .5s}
 .ab u{text-decoration:none;background:var(--ink);color:#fff;padding:0 4px}
+.door{display:block;padding:clamp(24px,3vw,44px);text-decoration:none;transition:transform .12s,box-shadow .12s}.door:hover{transform:translate(-3px,-3px);box-shadow:11px 11px 0 var(--ink)}.door b{display:block;font-size:clamp(40px,5.4vw,76px);font-weight:850;letter-spacing:-.06em;line-height:.95;text-transform:uppercase}.door span{display:block;font-size:clamp(18px,1.9vw,24px);line-height:1.3;margin-top:16px;max-width:24em;letter-spacing:-.02em}
 .said{font-size:clamp(20px,2.4vw,30px);font-weight:750;letter-spacing:-.03em;margin-top:26px;min-height:1.4em}
 .clipgrid{display:grid;grid-template-columns:minmax(0,.8fr) minmax(0,1.6fr);gap:clamp(24px,4vw,64px);align-items:center}
 .clipgrid+.clipgrid{margin-top:clamp(64px,8vw,120px)}
@@ -90,9 +91,18 @@ footer{padding:36px var(--gut) 52px;display:flex;flex-wrap:wrap;gap:12px 26px;ju
   <div class="wrap" id="top"><div class="in">
     <h1>Learn from<br><em>real</em> things</h1>
     <p>Drop in a page. Get a course, a video, a game and a tutor that draws. See who wrote every part of it.</p>
-    <div class="row"><a class="btn y" href="#get">Get it for Hermes</a><a class="btn" href="#play">Play one now</a></div>
+    <div class="row"><a class="btn y" href="https://hackathon.design-bakery.com/app?as=student">Use it now</a><a class="btn" href="#play">Play one now</a><a class="btn" href="#get">Get it for Hermes</a></div>
   </div></div>
 </div>
+
+<section id="use"><div class="wrap" style="padding-bottom:clamp(40px,6vw,80px)"><div class="in">
+  <h2 data-in>No sign-in.<br>It just works.</h2>
+  <div class="two">
+    <a class="door card" style="background:var(--sky)" href="https://hackathon.design-bakery.com/app?as=student"><b>Student</b><span>Drop a page, get a course, play it, hand work in.</span></a>
+    <a class="door card" style="background:var(--pink)" href="https://hackathon.design-bakery.com/app?as=teacher"><b>Teacher</b><span>Turn a PDF into an exam. Show a QR. Students join on their phones.</span></a>
+  </div>
+  <p class="m" style="margin-top:22px">Each device gets its own private space, deleted after 3 quiet days. Don't add anything private.</p>
+</div></div></section>
 
 <section class="games" id="play"><div class="wrap"><div class="in">
   <h2 data-in>Play a lesson</h2>
