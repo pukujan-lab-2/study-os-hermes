@@ -334,8 +334,8 @@
   addEventListener('blur', up)
   help.addEventListener('click', e => { e.stopPropagation(); help.classList.remove('on') })
 
-  /* ---- autopilot: the whole show in 2:42 -------------------------------------------------------------------------------------- */
-  const SECS = { two: 7, ab: 18, stop: 8, show: 23, seams: 15, quiz: 8, play: 12, tutor: 19, watch: 7, who: 10, exam: 7, hand: 7, signals: 8, meet: 6, what: 6, features: 8, qr: 8 }, REVEAL = 8
+  /* ---- autopilot: the whole show -------------------------------------------------------------------------------------- */
+  const SECS = { two: 5, ab: 15, stop: 7, show: 25, seams: 13, quiz: 6, play: 10, tutor: 18, watch: 6, who: 8, exam: 6, hand: 6, signals: 7, meet: 5, what: 4, features: 7, qr: 7 }, REVEAL = 7
   const PLAN = Object.fromEntries(S.map((x, k) => [k, SECS[x.dataset.key] || 0]).filter(x => x[1]))
   const TOTAL = Object.values(PLAN).reduce((a, b) => a + b, 0)
   const fast = window.__speed || 1
