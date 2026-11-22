@@ -165,7 +165,7 @@ $$('[data-copy]').forEach(function(b){b.addEventListener('click',function(){copy
 $('#send').addEventListener('click',function(){var d={title:'Study OS for Hermes',text:'Install the plugin pukujan-lab-2/study-os-hermes and set it up for me.',url:location.href.split('#')[0]};if(navigator.share)navigator.share(d).catch(function(){});else copy(d.url)});
 /* games and the film; the film answers to postMessage({t}) */
 var frame=$('.stage iframe'),film=0,t0=0;
-function load(n){cancelAnimationFrame(film);film=0;frame.src='play/'+n+'.html';frame.onload=function(){if(n!=='film-wide')return;t0=performance.now();(function tick(now){frame.contentWindow.postMessage({t:((now||t0)-t0)/1000%101},'*');film=requestAnimationFrame(tick)})(t0)};
+function load(n){cancelAnimationFrame(film);film=0;frame.src='play/'+n+'.html?v=160432';frame.onload=function(){if(n!=='film-wide')return;t0=performance.now();(function tick(now){frame.contentWindow.postMessage({t:((now||t0)-t0)/1000%101},'*');film=requestAnimationFrame(tick)})(t0)};
  $$('.tabs button').forEach(function(b){b.setAttribute('aria-pressed',b.dataset.g===n)});$('.stage').style.aspectRatio=n==='film-wide'?'16/9':'';fit()}
 $$('.tabs button').forEach(function(b){b.addEventListener('click',function(){load(b.dataset.g)})});
 var seen=new IntersectionObserver(function(es){es.forEach(function(e){if(e.isIntersecting){seen.disconnect();load('melt')}})},{rootMargin:'300px'});seen.observe($('.stage'));
