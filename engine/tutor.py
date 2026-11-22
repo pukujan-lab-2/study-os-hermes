@@ -41,15 +41,43 @@ def turn(section_id: str, said: str, history: list[dict]) -> dict:
 # ---- drawing -------------------------------------------------------------------------------------------------
 
 COLORS = ("ink", "blue", "red", "yellow", "green", "pink")
-_N = {"type": "number"}
-MARK = {"type": "object", "required": ["kind"], "properties": {"kind": {"type": "string", "enum": ["circle", "box", "line", "arrow", "path", "text"]}, "x": _N, "y": _N, "x2": _N, "y2": _N, "r": _N, "w": _N, "h": _N, "d": _S, "text": _S, "size": _N, "color": {"type": "string", "enum": list(COLORS)}, "fill": {"type": "boolean"}}}
-SKETCH_SCHEMA = {"type": "object", "required": ["title", "marks"], "properties": {"title": _S, "marks": {"type": "array", "items": MARK}}}
 SKETCH = f"""You draw on a whiteboard 900 wide and 560 high (0,0 is top left), for a learner, in the order a teacher would draw it.
-- 9 to 16 marks, big and bold. Draw the real thing so it is recognizable (a cell, a cup, a raisin, a hill with a ball), not boxes with words, unless the idea is a process.
-- circle: x, y, r. box: x, y (top left), w, h. line and arrow: x, y to x2, y2. path: d, an SVG path with only M L C Q Z and numbers, for curves and outlines. text: x, y (its left end), text (under 6 words), size 30 to 42.
-- Label what matters, with each label beside its thing and never on top of another mark. Leave 30 of margin at every edge, and use the whole board.
-- color: ink for outlines and labels; blue, red, yellow, green, pink to tell things apart. fill: true for a soft tint inside a shape.
-- It must be correct. {prompts.HOUSE}"""
+Reply with one mark per line and nothing else. The first line is "title: ..." (under 8 words). Then 9 to 18 marks, each exactly one of:
+circle X Y R color [fill]
+box X Y W H color [fill]
+line X Y X2 Y2 color
+arrow X Y X2 Y2 color
+text X Y SIZE color the words
+path color [fill] M 10 10 Q 50 5 90 10
+- Draw the real thing so it is recognizable (a cell, a cup, a hill with a ball), big and bold, using the whole board. Paths use only M L C Q Z and numbers, for outlines and curves.
+- Label what matters beside its thing, never on top of another mark. text: under 5 words, SIZE 30 to 40, X is its left end. Keep 30 of margin at every edge.
+- color: ink for outlines and labels; blue, red, yellow, green, pink to tell things apart. fill adds a soft tint.
+- It must be correct. No emoji."""
+
+
+def read_sketch(text: str) -> dict:
+    """The lines a model wrote, as marks. Anything that isn't one of the six is left out."""
+    title, marks = "", []
+    for line in text.replace("`", "").splitlines():
+        w = line.strip().lstrip("-* ").split()
+        if not w:
+            continue
+        k = w[0].lower().rstrip(":")
+        if k == "title":
+            title = " ".join(w[1:])
+        elif k in ("circle", "box", "line", "arrow"):
+            n = {"circle": ("x", "y", "r"), "box": ("x", "y", "w", "h")}.get(k, ("x", "y", "x2", "y2"))
+            rest = [x.lower() for x in w[1 + len(n):]]
+            marks.append({"kind": k, **dict(zip(n, w[1 : 1 + len(n)])), "color": next((x for x in rest if x in COLORS), "ink"), "fill": "fill" in rest})
+        elif k == "text" and len(w) > 5:
+            marks.append({"kind": "text", "x": w[1], "y": w[2], "size": w[3], "color": w[4].lower(), "text": " ".join(w[5:]).strip('"')})
+        elif k == "path":
+            rest = w[1:]
+            opts = []
+            while rest and rest[0].lower() in (*COLORS, "fill", "[fill]"):
+                opts.append(rest.pop(0).lower().strip("[]"))
+            marks.append({"kind": "path", "color": next((x for x in opts if x in COLORS), "ink"), "fill": "fill" in opts, "d": " ".join(rest)})
+    return {"title": title, "marks": marks}
 
 
 def clean_sketch(out: dict) -> dict | None:
@@ -82,7 +110,7 @@ def sketch(section_id: str, what: str) -> dict:
     s = row("select title, body from sections where id = ?", section_id)
     if not s or not s["body"]:
         raise Problem("That section isn't written yet.")
-    out = clean_sketch(llm.data(SKETCH, f"<lesson title=\"{s['title']}\">\n{s['body'][:6000]}\n</lesson>\n\nDraw: {what.strip()[:300]}", SKETCH_SCHEMA, max_tokens=6000, purpose="sketch"))
+    out = clean_sketch(read_sketch(llm.text(SKETCH, f"<lesson title=\"{s['title']}\">\n{s['body'][:3000]}\n</lesson>\n\nDraw: {what.strip()[:300]}", max_tokens=1800, purpose="sketch")))
     if not out:
         raise Problem("That drawing didn't work out. Ask again.")
     return out

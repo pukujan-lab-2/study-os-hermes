@@ -8,6 +8,22 @@ import re
 from . import PLUGIN
 
 _llm = None
+TASK = "study_os_solo"  # its own row in Hermes' auxiliary models: low thinking, so lessons and drawings come quickly
+_task_ok = True
+
+
+def _call(fn, **k):
+    """One model call, on this plugin's own Hermes task when it is registered here."""
+    global _task_ok
+    if _task_ok:
+        try:
+            return fn(task=TASK, **k)
+        except Exception as err:  # noqa: BLE001
+            if "task" not in str(err).lower():
+                raise
+            _task_ok = False  # an older Hermes, or a process where the agent half didn't load
+    return fn(**k)
+
 
 
 class ModelError(Exception):
@@ -44,7 +60,7 @@ def _explain(err: Exception) -> str:
 def text(system: str, user: str, *, max_tokens: int = 7000, purpose: str = "lesson") -> str:
     for attempt in range(2):
         try:
-            r = _get().complete([{"role": "system", "content": system}, {"role": "user", "content": user}], max_tokens=max_tokens, timeout=240, purpose=f"study-os-solo.{purpose}")
+            r = _call(_get().complete, messages=[{"role": "system", "content": system}, {"role": "user", "content": user}], max_tokens=max_tokens, timeout=240, purpose=f"study-os-solo.{purpose}")
             out = strip_fence(r.text or "")
             if out.strip():
                 return out
@@ -70,13 +86,13 @@ def data(system: str, user: str, schema: dict, *, max_tokens: int = 7000, purpos
     for attempt in range(3):
         try:
             if attempt < 2:
-                r = _get().complete_structured(
+                r = _call(_get().complete_structured,
                     instructions=system + note, input=[{"type": "text", "text": user}], json_schema=strict(schema), max_tokens=max_tokens, timeout=240, purpose=f"study-os-solo.{purpose}"
                 )
                 parsed = r.parsed if r.parsed is not None else first_json(r.text or "")
             else:  # a provider without structured replies still writes JSON when asked
                 ask = f"{system}\n\nReply with only a JSON object that fits this schema:\n{json.dumps(schema)}{note}"
-                r = _get().complete([{"role": "system", "content": ask}, {"role": "user", "content": user}], max_tokens=max_tokens, timeout=240, purpose=f"study-os-solo.{purpose}")
+                r = _call(_get().complete, messages=[{"role": "system", "content": ask}, {"role": "user", "content": user}], max_tokens=max_tokens, timeout=240, purpose=f"study-os-solo.{purpose}")
                 parsed = first_json(r.text or "")
             if isinstance(parsed, dict):
                 missing = [k for k in schema.get("required", []) if k not in parsed]

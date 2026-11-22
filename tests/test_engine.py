@@ -55,6 +55,8 @@ class FakeModel:
         if self.fail_lesson:
             self.fail_lesson -= 1
             raise RuntimeError("429 rate limit")
+        if "whiteboard" in messages[0]["content"]:
+            return SimpleNamespace(text="title: Cell\ncircle 100 100 9999 blue fill\narrow 1 1 50 50 red\ntext 5 5 30 ink Cell wall\npath ink M0 0 <script>\npath green fill M 1 1 L 20 20 Z\nblob 1 2")
         self.bodies += 1
         return SimpleNamespace(text=f"# Title\n\n### Why\n\nBody {self.bodies}.\n\n> **Compare it to cooking:** like soup.\n\n### Then\n\nMore.")
 
@@ -72,8 +74,6 @@ class FakeModel:
             out = {"title": "Film <b>", "scenes": [{"kind": "title", "heading": "Osmosis & you", "say": "Water moves.", "items": [{"label": "A short film"}]}, {"kind": "steps", "heading": "How", "say": "First this then that.", "items": [{"label": "One", "note": "a"}, {"label": "Two"}]}, {"kind": "compare", "heading": "Empty one", "say": "Nothing to compare here."}, {"kind": "question", "heading": "Why?", "say": "Think about it."}]}
         elif req == ["say"]:
             out = {"say": "What do you think moves?", "quiz": False, "draw": "a cell"}
-        elif "marks" in req and "title" in req:
-            out = {"title": "Cell", "marks": [{"kind": "circle", "x": 100, "y": 100, "r": 9999}, {"kind": "arrow", "x": 1, "y": 1, "x2": 50, "y2": 50}, {"kind": "text", "x": 5, "y": 5, "text": "Cell"}, {"kind": "path", "d": "M0 0 <script>"}, {"kind": "blob"}]}
         elif "instructions" in req:
             out = {"title": "Mock exam", "instructions": "Take your time.", "questions": [{"kind": "choice", "prompt": "Pick", "options": ["a", "b", "c"], "answer": "b", "points": 2, "guide": ""}, {"kind": "choice", "prompt": "Broken", "options": ["a", "b", "c"], "answer": "z", "points": 2, "guide": ""}, {"kind": "essay", "prompt": "Explain", "points": 10, "guide": "water"}]}
         elif req == ["marks"]:
@@ -396,9 +396,9 @@ class Media(Case):
         t = tutor.turn(s["id"], "", [])
         self.assertEqual((t["say"], t["draw"]), ("What do you think moves?", "a cell"))
         k = tutor.sketch(s["id"], t["draw"])["marks"]
-        self.assertEqual([m["kind"] for m in k], ["circle", "arrow", "text"])  # the script path and the bad ones are gone
+        self.assertEqual([m["kind"] for m in k], ["circle", "arrow", "text", "path"])  # the script path and the bad ones are gone
         self.assertEqual(k[0]["r"], 280)
-        self.assertTrue(llm.strict(tutor.SKETCH_SCHEMA)["properties"]["marks"]["items"]["additionalProperties"] is False)
+        self.assertTrue(llm.strict(media.FILM_SCHEMA)["properties"]["scenes"]["items"]["additionalProperties"] is False)
         with self.assertRaises(services.ServiceError):
             voice.hear(b"not a wav")
 
