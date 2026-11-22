@@ -10,7 +10,7 @@ Learn anything inside [Hermes](https://github.com/NousResearch/hermes-agent), on
 hermes plugins install pukujan-lab-2/study-os-hermes --enable
 ```
 
-Then, in Hermes Desktop, open **Capabilities → Plugins**, choose **Rescan**, and turn on **Study OS Solo**. It appears in the sidebar. In chat, just ask: "Make me a course on how vaccines work", "Quiz me on what's due", "Teach me section 2".
+Then, in Hermes Desktop, open **Capabilities → Plugins**, choose **Rescan**, and turn on **Study OS Solo**. **Study OS** and **Study OS Teacher** appear in the sidebar. In chat, just ask: "Make me a course on how vaccines work", "Quiz me on what's due", "Teach me section 2".
 
 ## What it does
 
@@ -20,10 +20,13 @@ Then, in Hermes Desktop, open **Capabilities → Plugins**, choose **Rescan**, a
 - **Quizzes** pick what you know least, say why a wrong answer is tempting, give one more try, and move your mastery of each goal.
 - **Review** brings each goal back after 1, 3, 7, 16, 35 and 75 days, sooner when you miss it.
 - **Explain it back** and see what you got, what's missing, and a question to try next.
+- **Check the source.** Drop a PDF or paste an article and see who wrote it, part by part, before you learn from it (Pangram).
+- **Class.** On the teacher's page, a document becomes an assignment or a mock exam with a deadline. Students work in the app, or hand in a photo of handwriting (Reducto reads it). The teacher sees a calendar, one row per student, suggested marks, and three signals: how it reads, whether it was typed, pasted or handwritten, and how long it took. Students are told all of this. They are signals to start a conversation, never proof.
+- **Meetings.** Students ask, teachers book, for one student or a group. Google Calendar and Gmail open already filled in; no Google sign-in is stored.
 - **What you know**: every goal, searchable, with what's known, being learned, and due. A streak keeps count.
 - **Watch** each section as an explainer, a vertical Short, or slides with notes. Every video is a [HyperFrames](https://hyperframes.heygen.com) composition: it plays live in Hermes, saves as a project, and renders to MP4 (with Node 22 and FFmpeg installed).
 - **Listen** to a two-host podcast, a one-minute recap, a quiz in your ear, or the lesson itself.
-- **Talk** it through out loud. A tutor that asks instead of lecturing, draws when it helps, hands you a quiz question when you're ready, and stops when you talk over it. You can type instead.
+- **Talk** it through out loud. A tutor that asks instead of lecturing, draws on a whiteboard when it helps, hands you a quiz question when you're ready, and stops when you talk over it. You can type instead.
 - **Essay check** for a draft: feedback that never rewrites it, how it reads (Pangram), and a blind A/B test against what a model would write. A detector can be wrong both ways; use it to start a conversation, never to decide one.
 
 ## Optional services, with your own keys
@@ -32,14 +35,14 @@ Add these under **Settings → Plugins → Study OS Solo**. Each key is stored b
 
 | Service | What it adds | Without it |
 |---|---|---|
-| [Reducto](https://reducto.ai) | Reads PDFs and scans, with tables | PDFs with text are read on your computer |
-| [Pangram](https://www.pangram.com) | Says whether an explanation or essay reads as AI-written: a signal, never proof | That check is off |
+| [Reducto](https://reducto.ai) | Reads PDFs, scans and photos of handwriting | PDFs with text are read on your computer |
+| [Pangram](https://www.pangram.com) | Says whether a source, an explanation or an essay reads as AI-written: a signal, never proof | That check is off |
 | [Modal](https://modal.com) | A natural voice and live listening on your own account: `modal deploy voice/modal_speech.py` | Your computer's own voice; listening uses Hermes' speech-to-text |
 
 ## What leaves your computer
 
 - The text a lesson, quiz or grade needs goes to the model you chose in Hermes. Choose a local model and it stays here.
-- A PDF goes to Reducto, an explanation or essay to Pangram, and lesson text and what you say out loud to Modal, only if you added that service.
+- A PDF or photo goes to Reducto; a source, explanation, essay or handed-in answer to Pangram; and lesson text and what you say out loud to Modal, only if you added that service.
 - Nothing else. There is no analytics and no Study OS server.
 
 Lessons made from a topic are written from what your model knows, with no sources. Check anything important.
@@ -53,7 +56,9 @@ python -m unittest discover -s tests
 hermes plugins validate .
 ```
 
-This is the solo edition. Classes, live rooms and the full catalog are part of the full Study OS, which is not in this repository.
+Teacher and student share work through one class folder, by default on the same computer; it can be a folder you both sync, such as one in Google Drive (the `class_folder` preference). A person can edit files in a folder they share, so treat what arrives as you would any homework.
+
+This is the solo edition. Live rooms, quiz battles and the full catalog are part of the full Study OS, which is not in this repository.
 
 ## License
 
