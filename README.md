@@ -63,3 +63,5 @@ This is the solo edition. Live rooms, quiz battles and the full catalog are part
 ## License
 
 [MIT](LICENSE)
+
+The pages use Inter and Space Mono, under the SIL Open Font License (see `licenses/`).
