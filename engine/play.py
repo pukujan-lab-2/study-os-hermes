@@ -18,7 +18,7 @@ Stage: the world is G.W wide and G.H high (about 900x560, or tall on phones when
 Scene: flat colours only, never gradients. G.room(backColor,hillColor,floorColor) or G.night(floorColor) first in draw, filling the screen. G.glow(x,y,r,color,alpha). G.flame(x,y,size,heat 0..1). G.box(x,y,w,h,radius,fill), G.ball(x,y,r,fill), G.sticker(path=>{{path.moveTo..}},fill,{{box:[x,y,w,h]}}) draw outlined stickers with a hard shadow. G.text(s,x,y,size,color,align), G.label(s,x,y). Colours: G.colors.blue yellow pink sky orange green ink paper.
 Motion: G.puff(x,y,{{n,kind,color,size,speed,angle,spread,gravity,life,around}}) and G.stream(x,y,ratePerSecond,sameOptions); kinds 'spark' 'smoke' 'bubble' 'drop' 'star' 'dot'. G.shake(n). G.ease(p) G.lerp(a,b,p) G.clamp(v,a,b) G.rand(a,b) G.dist(x,y,x2,y2).
 Dragging: const b = G.drag('id', startX, startY, radius, b=>{{ clamp b.x b.y }}) every frame; read b.x b.y b.held. G.place('id',x,y). Draw it inside G.squashed(b, ()=>{{...}}).
-Play: G.goal(text) (under 8 words), G.gauge(value0to1,label,color,[lo,hi] target zone), G.hint(x,y,toX,toY) once per level, G.toast(text), G.win(text under 7 words), G.fail(text), G.playing(). G.lesson(text under 12 words) for the end screen.
+Play: G.goal(text) (under 8 words), G.gauge(value0to1,label,color,[lo,hi] target zone), G.why(text) the line along the bottom that says what is happening right now and why (under 14 words, plain, a cause: "Heat makes the particles shake loose, so the wax turns liquid"), G.hint(x,y,toX,toY) once per level, G.toast(text), G.win(text under 7 words), G.fail(text), G.playing(). G.lesson(text under 12 words) for the end screen.
 Structure: let state; G.onLevel = n => {{ set up state for level n, call G.goal and G.hint }}; G.run(dt => {{ update }}, c => {{ draw }});
 
 Make it wonderful:
@@ -27,6 +27,7 @@ Make it wonderful:
 - Place every thing relative to G.W and G.H inside draw and update (never once in onLevel), so it still fits when the window changes shape. Keep the top 80 and bottom 60 clear.
 - Constant life: wobble, drift, steam, glow that follows the state. Immediate, juicy response to every drag.
 - Three levels that add one new part of the idea each. Each is winnable in 10 to 25 seconds by doing the right physical thing, and needs the idea. Hold a state for about 2 seconds to win, shown in the gauge. Failing resets gently.
+- Always explain: call G.why in every update with the line for the current state (too little, just right, too much, and why), so someone watching learns the cause without playing. The win text says what it showed.
 - The science must be right. Between 100 and 170 lines, exactly one G.run call with both functions. Everything that is drawn goes in the second function. No emoji.
 
 The shape of a good one (a lantern game, shortened; yours is about your own idea and richer):
@@ -40,6 +41,7 @@ G.run(dt => {{
   G.stream(G.W / 2, G.H * .4, s.heat * 30, {{kind: 'spark', color: ['#ffc93c', '#f26b2e'], angle: -1.57, spread: .5, speed: 170}});
   const good = s.heat > .55 && s.heat < .8; s.hold = good ? s.hold + dt : Math.max(0, s.hold - dt);
   G.gauge(s.heat, 'air', good ? '#1a7748' : '#2f3cdc', [.55, .8]);
+  G.why(s.heat < .3 ? 'No fresh air gets in, so the flame starves' : good ? 'Fresh air brings oxygen, so the wax keeps burning' : 'Too much air: the flame burns wild');
   if (s.hold > 2 && G.playing()) G.win('Air feeds fire');
 }}, c => {{
   G.night('#2a2350'); G.glow(G.W / 2, G.H * .45, 120 + s.heat * 300, '#ffb03b', .5);

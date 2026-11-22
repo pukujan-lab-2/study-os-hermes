@@ -23,12 +23,16 @@ import anyio.to_thread
 from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, Response
 from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel, Field
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path[:0] = [str(ROOT), str(ROOT / "dashboard")]
 api = importlib.import_module("plugin_api")
 E = {n: importlib.import_module(f"{api.NAME}.{n}") for n in ("place", "llm", "services", "store", "courses")}
 Place, here = E["place"].Place, E["place"].here
+from web import presenter  # noqa: E402
+from web.model import Claude  # noqa: E402
+
 DATA = Path(os.environ.get("WEB_DATA", "/data"))
 SEED = Path(os.environ.get("WEB_SEED", ROOT / "web" / "seed"))
 SITE = Path(os.environ.get("WEB_SITE", "/site"))
@@ -146,7 +150,7 @@ class Spaces:
 
     async def __call__(self, scope, receive, send):
         path = scope.get("path", "")
-        if scope["type"] != "http" or not path.startswith(("/api/", "/app")):
+        if scope["type"] != "http" or not path.startswith(("/api/", "/app")) or path.startswith("/api/presenter"):
             return await self.app(scope, receive, send)
         head = {k.decode().lower(): v.decode("latin1") for k, v in scope["headers"]}
         jar = SimpleCookie()
@@ -247,6 +251,8 @@ async def headers(request, call_next):
     r.headers.setdefault("referrer-policy", "no-referrer")
     if request.url.path == "/app/static/frame.html":
         r.headers["content-security-policy"] = "sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; font-src data:; frame-ancestors 'self'"
+    elif not request.url.path.startswith(("/app", "/api")) and request.url.path.endswith(("/", ".html", ".js", ".css")):
+        r.headers["cache-control"] = "no-cache, must-revalidate"  # the talk and the page change; never an old copy
     elif request.url.path.startswith("/app"):
         r.headers["content-security-policy"] = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' data: blob:; font-src 'self' data:; frame-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
         r.headers["cache-control"] = "no-store"
@@ -347,6 +353,99 @@ def page():
     return FileResponse(ROOT / "web" / "static" / "index.html")
 
 
+# ---- the talk's host: no device, its own limits, and callable from the deck wherever it is opened ------------------------
+
+HOST = {"ask": (600, 2500), "say": (500, 2500), "hear": (900, 3500)}  # a day: each address, everyone
+CORS = {"access-control-allow-origin": "*", "access-control-allow-headers": "content-type", "cache-control": "no-store"}
+fast = Claude(os.environ.get("PRESENTER_MODEL", "claude-haiku-5-5"))
+
+
+def host_spend(request: Request, kind: str) -> bool:
+    ip = request.headers.get("cf-connecting-ip") or (request.client.host if request.client else "?")
+    who, day = "ip:" + hashlib.sha256(ip.encode()).hexdigest()[:16], time.strftime("%Y-%m-%d")
+    with lock, meta() as c:
+        n = {w: (c.execute("select n from used where day = ? and who = ? and kind = ?", (day, w, f"host-{kind}")).fetchone() or [0])[0] for w in (who, "")}
+        if n[who] >= HOST[kind][0] or n[""] >= HOST[kind][1]:
+            return False
+        for w in (who, ""):
+            c.execute("insert into used (day, who, kind, n) values (?, ?, ?, 1) on conflict(day, who, kind) do update set n = n + 1", (day, w, f"host-{kind}"))
+    return True
+
+
+class Slide(BaseModel):
+    n: int
+    title: str = Field("", max_length=120)
+    notes: str = Field("", max_length=700)
+
+
+class Heard(BaseModel):
+    text: str = Field(min_length=1, max_length=600)
+    slide: int = 1
+    speaking: bool = False
+    slides: list[Slide] = Field([], max_length=24)
+    history: list[dict] = Field([], max_length=40)
+
+
+class Line(BaseModel):
+    text: str = Field(min_length=1, max_length=420)
+
+
+@app.options("/api/presenter/{path}")
+def host_options(path: str):
+    return Response(status_code=204, headers={**CORS, "access-control-allow-methods": "POST, GET, OPTIONS"})
+
+
+@app.post("/api/presenter/hear")
+def host_hear(body: Heard, request: Request):
+    if not host_spend(request, "ask"):
+        return JSONResponse({"detail": "The host has talked enough today."}, 429, headers=CORS)
+    try:
+        return JSONResponse(presenter.ask(fast, body.model_dump()), headers=CORS)
+    except Exception as err:  # noqa: BLE001 - the talk goes on without it
+        print("presenter:", type(err).__name__, str(err)[:160], flush=True)
+        return JSONResponse({"detail": "The host didn't catch that."}, 503, headers=CORS)
+
+
+@app.post("/api/presenter/say")
+def host_say(body: Line, request: Request):
+    f = DATA / "voice" / f"host-{presenter.key(body.text)}.wav"
+    if not f.exists():
+        if not host_spend(request, "say"):
+            return JSONResponse({"detail": "no voice"}, 429, headers=CORS)
+        try:
+            wav = E["services"].modal_tts(body.text, os.environ.get("PRESENTER_VOICE", "am_michael"))
+        except Exception:  # noqa: BLE001 - asleep: the page uses the browser's voice
+            return JSONResponse({"detail": "no voice"}, 503, headers=CORS)
+        f.write_bytes(wav)
+    return Response(f.read_bytes(), media_type="audio/wav", headers=CORS)
+
+
+@app.post("/api/presenter/listen")
+async def host_listen(request: Request):
+    """One spoken sentence (a 16 kHz wav) as words."""
+    wav = await request.body()
+    if len(wav) < 2000 or len(wav) > 1_200_000 or wav[:4] != b"RIFF":
+        return JSONResponse({"text": ""}, headers=CORS)
+    if not await anyio.to_thread.run_sync(host_spend, request, "hear"):
+        return JSONResponse({"detail": "enough"}, 429, headers=CORS)
+    try:
+        return JSONResponse({"text": await anyio.to_thread.run_sync(E["services"].modal_stt, wav)}, headers=CORS)
+    except Exception as err:  # noqa: BLE001 - asleep
+        print("listen:", type(err).__name__, flush=True)
+        return JSONResponse({"detail": "asleep"}, 503, headers=CORS)
+
+
+@app.get("/api/presenter/wake")
+def host_wake():
+    """Wakes the voice before the talk."""
+    ok = False
+    try:
+        ok = E["services"].modal_warm()
+    except Exception:  # noqa: BLE001
+        pass
+    return JSONResponse({"awake": ok}, headers=CORS)
+
+
 @app.get("/healthz")
 def health():
     return {"ok": True}
@@ -355,7 +454,5 @@ def health():
 app.mount("/app/static", StaticFiles(directory=ROOT / "web" / "static"), name="static")
 if SITE.is_dir():
     app.mount("/", StaticFiles(directory=SITE, html=True), name="site")
-
-from web.model import Claude  # noqa: E402
 
 E["llm"].use(Claude())

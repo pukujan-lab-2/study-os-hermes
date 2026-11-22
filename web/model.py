@@ -12,7 +12,8 @@ MODEL = os.environ.get("STUDYOS_MODEL", "claude-sonnet-5-5")
 
 
 class Claude:
-    def __init__(self) -> None:
+    def __init__(self, model: str = MODEL) -> None:
+        self._model = model
         self._made, self._client = None, None
 
     def client(self) -> anthropic.Anthropic:
@@ -29,10 +30,10 @@ class Claude:
         return self._client
 
     def _ask(self, system, messages, max_tokens, timeout, purpose, schema=None):
-        out = {"effort": "medium" if "game" in purpose else "low"}
+        out = {} if "haiku" in self._model else {"effort": "medium" if "game" in purpose else "low"}
         if schema:
             out["format"] = {"type": "json_schema", "schema": schema}
-        r = self.client().with_options(timeout=timeout).messages.create(model=MODEL, max_tokens=max_tokens, system=system, messages=messages, extra_body={"output_config": out})
+        r = self.client().with_options(timeout=timeout).messages.create(model=self._model, max_tokens=max_tokens, system=system, messages=messages, extra_body={"output_config": out} if out else {})
         return "".join(b.text for b in r.content if b.type == "text")
 
     def complete(self, *, messages, max_tokens=7000, timeout=240, purpose="", **_):
