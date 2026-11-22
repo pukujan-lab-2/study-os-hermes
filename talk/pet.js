@@ -53,7 +53,7 @@
 <g class="zz"><text x="150" y="96">z</text><text x="176" y="70">z</text></g></g></svg></button><div id="bubble" class="top" role="status"></div>`
   const bar = document.createElement('div'); bar.id = 'autobar'
   const help = document.createElement('div'); help.id = 'helpbox'
-  help.innerHTML = `<div><h3>Keys and voice</h3><p><b>C</b> call the candle. Talk normally: it works out when you mean it, answers out loud and runs the slides. C again hangs up.</p><p><b>→</b> next or reveal <b style="margin-left:14px">←</b> back <b style="margin-left:14px">R</b> replay <b style="margin-left:14px">F</b> full screen <b style="margin-left:14px">N</b> notes <b style="margin-left:14px">T</b> clock</p><p><b>A</b> autopilot: the candle runs the show. Any key takes it back.</p><p><b>V</b> hold to talk, let go to send. Holding the candle works too. No wake words; the safe choice in a noisy room.</p><p>next, back, reveal, play, play again, pause, show the game, show the seams, show the tutor, show the exam, signals, quiz, podcast, A or B, sponsors, start, QR code, slide five, run the show</p><p><b>L</b> hands-free: it waits for <i>“hey study”</i> or <i>“hey candle”</i>, then takes one of those. It ignores everything else.</p><p class="q">Modal turns what the mic hears into words. Nothing is listened to until you press C, V or L.</p></div>`
+  help.innerHTML = `<div><h3>Mr Candle</h3><p><b>C</b> call Mr Candle. He only talks on a call, and you start muted.</p><p><b>V</b> hold to talk, or hold the button. <b>C</b> again opens the mic; it mutes itself while he or a clip is talking. End call hangs up.</p><p><b>P</b> on a call, he presents the whole thing. Hold V to stop him and ask; he carries on after.</p><p><b>→</b> next or reveal <b style="margin-left:14px">←</b> back <b style="margin-left:14px">R</b> replay <b style="margin-left:14px">F</b> full screen <b style="margin-left:14px">N</b> notes <b style="margin-left:14px">T</b> clock</p><p>Say: next, back, reveal, play again, pause, go on, show the game, show everything, what does Pangram do, which ones does Modal do, take it away, be quiet.</p><p style="font-size:17px">Nothing is listened to until you press P, C or V. Modal turns what the mic hears into words; Claude decides; Modal speaks.</p></div>`
   stage.append(bar, pet); document.body.append(help)
   const bubble = pet.querySelector('#bubble'), body = pet.querySelector('#petbody')
 
@@ -248,12 +248,12 @@
   window.__parse = parse
   window.__hear = text => hear(text, true)
 
+  let inCall = false
   /* ---- the microphone ------------------------------------------------------------------------------------------------------ */
   const SR = window.StudyEars || window.SpeechRecognition || window.webkitSpeechRecognition
   let rec = null, on = false, fails = 0, skip = false
   /* push to talk: hold V (or the candle), say it, let go. No wake words. */
   let ptt = false, words = '', sent = true, pttAt = 0, pttStop = 0, from = 0, count = 0
-  let inCall = false
   function down() {
     if (ptt || inCall) return
     ptt = true; words = ''; sent = false; from = count; pttAt = Date.now()
@@ -328,7 +328,7 @@
     } catch (e) { on = false; ptt = false; sent = true; rec = null; pet.classList.remove('ears', 'held', 'awake'); say('No voice here', 2600) }
   }
   body.addEventListener('click', e => { e.stopPropagation(); body.blur() })
-  body.addEventListener('pointerdown', e => { e.stopPropagation(); e.preventDefault(); try { body.setPointerCapture(e.pointerId) } catch (x) {} down() })
+  body.addEventListener('pointerdown', e => { e.stopPropagation(); e.preventDefault(); if (window.__call) return window.__call.tap(); try { body.setPointerCapture(e.pointerId) } catch (x) {} down() })
   for (const t of ['pointerup', 'pointercancel']) body.addEventListener(t, e => { e.stopPropagation(); up() })
   addEventListener('keyup', e => { if (e.key.toLowerCase() === 'v') up() })
   addEventListener('blur', up)
@@ -336,6 +336,7 @@
 
   /* ---- autopilot: the whole show -------------------------------------------------------------------------------------- */
   const SECS = { two: 5, ab: 15, stop: 7, show: 25, seams: 13, quiz: 6, play: 10, tutor: 18, watch: 6, who: 8, exam: 6, hand: 6, signals: 7, meet: 5, what: 4, features: 7, qr: 7 }, REVEAL = 7
+  window.__SECS = SECS
   const PLAN = Object.fromEntries(S.map((x, k) => [k, SECS[x.dataset.key] || 0]).filter(x => x[1]))
   const TOTAL = Object.values(PLAN).reduce((a, b) => a + b, 0)
   const fast = window.__speed || 1
@@ -365,9 +366,9 @@
     const k = e.key.toLowerCase(), was = auto
     if (e.repeat && k !== 'v') return
     if (was) stopAuto()
-    if (k === 'a' && !was) startAuto()
-    else if (k === 'v') { if (!e.repeat) down() }
-    else if (k === 'l') { if (!inCall) listen(!on) }
+    if (k === 'a' && !was && !window.__call) startAuto()
+    else if (k === 'v') { if (!e.repeat && !window.__call) down() }
+    else if (k === 'l') { if (!window.__call) listen(!on) }
     else if (k === 'h') help.classList.toggle('on')
     else if (k === 'escape') help.classList.remove('on')
   }, true)
@@ -378,6 +379,7 @@
     quiet: () => { bubble.classList.remove('on'); pet.classList.remove('say') },
     face: (c, v) => pet.classList.toggle(c, v),
     /** A call takes the microphone; hold-to-talk and hands-free step aside. */
+    shove, uncover, home, conduct: v => (v ? pose('conduct') : pose('')),
     busyMic: v => { if (v) { if (on) listen(false); if (rec) { const r = rec; rec = null; try { r.abort() } catch (x) {} } } inCall = v }
   }
   window.__pet = { state: () => ({ i, on, awake: Date.now() < awakeUntil, auto: !!auto, total: TOTAL, cls: pet.className, bubble: bubble.classList.contains('on') ? bubble.textContent : '' }) }

@@ -28,10 +28,11 @@
         const x = new Float32Array(e.inputBuffer.getChannelData(0))
         let s = 0
         for (let k = 0; k < x.length; k++) s += x[k] * x[k]
-        const rms = Math.sqrt(s / x.length), ms = x.length / ac.sampleRate * 1000, voice = rms > Math.max(0.012, floor * 2.8)
+        const rms = Math.sqrt(s / x.length), ms = x.length / ac.sampleRate * 1000, voice = rms > Math.max(0.012, floor * 2.8) * (Ears.talking ? 1.7 : 1) // it is speaking too: only a clear voice counts
         floor = voice ? floor * 0.999 + rms * 0.001 : floor * 0.95 + rms * 0.05
         Ears.level = rms
-        if (Ears.hold) { (this.talk = this.talk || this.pre.splice(0)).push(x); quiet = 0; return } // hold to talk: everything, until it's let go
+        if (Ears.muted && !Ears.hold) { if (this.talk) this.drop(); this.pre = []; loud = 0; return }
+        if (Ears.hold) { if (this.sid) this.drop(true); (this.talk = this.talk || this.pre.splice(0)).push(x); quiet = 0; return } // hold to talk: everything, until it's let go
         if (!this.talk) {
           this.pre.push(x); if (this.pre.length > 9) this.pre.shift()
           loud = voice ? loud + ms : Math.max(0, loud - ms)
@@ -39,11 +40,18 @@
         } else {
           this.talk.push(x)
           quiet = voice ? 0 : quiet + ms
-          if (quiet > 620 || this.talk.length * ms > 13000) { loud = 0; this.cut() }
+          if (this.onsegment) { // guess early that the sentence is over, and take it back if they go on
+            if (voice && this.sid) { this.oncancel(this.sid); this.sid = 0 }
+            if (!this.sid && quiet > 240 && this.talk.length * ms > 420) { this.sid = ++Ears.ids; this.onsegment(this.sid, wav(this.talk, ac.sampleRate)) }
+            if (quiet > 520 || this.talk.length * ms > 13000) { loud = 0; if (!this.sid && this.talk.length * ms > 420) { this.sid = ++Ears.ids; this.onsegment(this.sid, wav(this.talk, ac.sampleRate)) } if (this.sid) this.onconfirm(this.sid); this.sid = 0; this.talk = null }
+          } else if (quiet > 620 || this.talk.length * ms > 13000) { loud = 0; this.cut() }
         }
       }
       ac.createMediaStreamSource(this.stream).connect(node); node.connect(ac.destination); ac.resume()
     }
+    drop(keep) { if (this.sid) { this.oncancel && this.oncancel(this.sid); this.sid = 0 } if (!keep) this.talk = null }
+    /** Hold-to-talk was let go: that is the whole sentence. */
+    release() { if (this.onsegment && this.talk && this.ac) { const t = this.talk; this.talk = null; if (t.length * 2048 / this.ac.sampleRate > 0.35) { const id = ++Ears.ids; this.onsegment(id, wav(t, this.ac.sampleRate)); this.onconfirm(id) } } }
     async cut() {
       const t = this.talk; this.talk = null
       if (!t || !this.ac || t.length * 2048 / this.ac.sampleRate < 0.28) return this.rest()
@@ -63,6 +71,6 @@
     stop() { if (!this.open) return; this.open = false; if (this.talk) this.cut(); else this.rest() }
     abort() { this.open = false; this.talk = null; this.dead = true; this.close(); this.onend && this.onend() }
   }
-  Ears.hold = false; Ears.level = 0
+  Ears.hold = false; Ears.level = 0; Ears.muted = false; Ears.talking = false; Ears.ids = 0
   if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia && (window.AudioContext) && window.isSecureContext !== false) window.StudyEars = Ears
 })()
