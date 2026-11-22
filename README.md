@@ -17,6 +17,9 @@ Then, in Hermes Desktop, open **Capabilities → Plugins**, choose **Rescan**, a
 ## What it does
 
 - **Make a course** from a topic, a PDF, a Word document, or pasted text. It's written in the background and picks up where it stopped if you close Hermes.
+- **Showcase.** Drop one page and watch it become a course and a film: Reducto reads it, Pangram says who wrote it, your model teaches it.
+- **Show the seams.** Every lesson has a label: who wrote it, who wrote its source, which line of the source each part came from (matched word for word by code, or it isn't shown), the choices made and what they were made instead of. Lessons with stock phrases are sent back once before you read them.
+- **Play** a small game made for the section, where you work the idea with your hands.
 - **Plain lessons.** Ideas are explained in their own subject with everyday things. A comparison to something you know well is optional, short, and folds away.
 - **Change how it's explained.** Simpler, slower, another level or style. Preview it, use it, switch back. Your progress stays.
 - **Quizzes** pick what you know least, say why a wrong answer is tempting, give one more try, and move your mastery of each goal.
