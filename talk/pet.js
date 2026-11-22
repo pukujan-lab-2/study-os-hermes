@@ -53,13 +53,18 @@
 <g class="zz"><text x="150" y="96">z</text><text x="176" y="70">z</text></g></g></svg></button><div id="bubble" class="top" role="status"></div>`
   const bar = document.createElement('div'); bar.id = 'autobar'
   const help = document.createElement('div'); help.id = 'helpbox'
-  help.innerHTML = `<div><h3>Keys and voice</h3><p><b>→</b> next or reveal <b style="margin-left:14px">←</b> back <b style="margin-left:14px">R</b> replay <b style="margin-left:14px">F</b> full screen <b style="margin-left:14px">N</b> notes <b style="margin-left:14px">T</b> clock</p><p><b>A</b> autopilot: the candle runs the show. Any key takes it back.</p><p><b>V</b> hold to talk, let go to send. Holding the candle works too. No wake words; the safe choice in a noisy room.</p><p>next, back, reveal, play, play again, pause, show the game, show the seams, show the tutor, show the exam, signals, quiz, podcast, A or B, sponsors, start, QR code, slide five, run the show</p><p><b>L</b> hands-free: it waits for <i>“hey study”</i> or <i>“hey candle”</i>, then takes one of those. It ignores everything else.</p><p class="q">Off until you press V or L. While it listens, Chrome sends what the microphone hears to Google to turn it into words.</p></div>`
+  help.innerHTML = `<div><h3>Keys and voice</h3><p><b>C</b> call the candle. Talk normally: it works out when you mean it, answers out loud and runs the slides. C again hangs up.</p><p><b>→</b> next or reveal <b style="margin-left:14px">←</b> back <b style="margin-left:14px">R</b> replay <b style="margin-left:14px">F</b> full screen <b style="margin-left:14px">N</b> notes <b style="margin-left:14px">T</b> clock</p><p><b>A</b> autopilot: the candle runs the show. Any key takes it back.</p><p><b>V</b> hold to talk, let go to send. Holding the candle works too. No wake words; the safe choice in a noisy room.</p><p>next, back, reveal, play, play again, pause, show the game, show the seams, show the tutor, show the exam, signals, quiz, podcast, A or B, sponsors, start, QR code, slide five, run the show</p><p><b>L</b> hands-free: it waits for <i>“hey study”</i> or <i>“hey candle”</i>, then takes one of those. It ignores everything else.</p><p class="q">Modal turns what the mic hears into words. Nothing is listened to until you press C, V or L.</p></div>`
   stage.append(bar, pet); document.body.append(help)
   const bubble = pet.querySelector('#bubble'), body = pet.querySelector('#petbody')
 
   /* ---- where it stands: x, size, which way it points, where its bubble goes -------------------------------------------- */
   const LEFT = { x: 300, k: 0.98, face: 'right', b: 'top' }
-  const SPOT = [{ x: 1500, k: 1.75, face: '', b: 'top' }, { x: 960, k: 0.46, face: 'up', b: 'right' }, LEFT, LEFT, LEFT, LEFT, LEFT, LEFT, { x: 960, k: 0.88, face: 'up', b: 'right' }, { x: 1510, k: 0.66, face: 'up', b: 'left' }]
+  const AT = {
+    title: { x: 1500, k: 1.75, face: '', b: 'top' }, ab: { x: 960, k: 0.4, face: 'up', b: 'right' }, features: { x: 1790, k: 0.42, face: 'up', b: 'left' }, qr: { x: 1510, k: 0.66, face: 'up', b: 'left' },
+    two: { x: 960, k: 0.95, face: 'up', b: 'right' }, what: { x: 960, k: 0.8, face: 'up', b: 'right' }, who: { x: 960, k: 0.5, face: 'up', b: 'right' }
+  }
+  const K = n => S[n].dataset.key, IX = k => S.findIndex(x => x.dataset.key === k), LASTN = S.length - 1
+  const SPOT = S.map(x => AT[x.dataset.key] || LEFT)
   const NAP = { x: 960, k: 0.42, face: '', b: 'right' }
   const CELL = { reducto: 240, pangram: 720, hermes: 1200, modal: 1680 }
   const timers = new Set()
@@ -106,17 +111,17 @@
     pet.classList.toggle('sleep', nap && !awakeUntil && !ptt)
     later(home, 260)
     if (!at) home()
-    if (n === 9) later(() => { pose('hold'); const q = S[9].querySelector('div[style*="width:560px"]'); if (q && !calm) q.animate([{ translate: '0 0' }, { translate: '0 -16px' }, { translate: '0 0' }], { duration: 1500, iterations: 2, easing: 'ease-in-out' }); later(() => pose(''), 5000) }, 900)
+    if (K(n) === 'qr') later(() => { pose('hold'); const q = S[n].querySelector('div[style*="width:560px"]'); if (q && !calm) q.animate([{ translate: '0 0' }, { translate: '0 -16px' }, { translate: '0 0' }], { duration: 1500, iterations: 2, easing: 'ease-in-out' }); later(() => pose(''), 5000) }, 900)
     const v = S[n].querySelector('video[data-sound]')
-    if (v) { v.onended = () => pose(''); later(() => { if (!v.paused) pose('conduct') }, 4200) }
+    if (v) { v.onended = () => pose(''); later(() => { if (!v.paused) pose('conduct') }, (+v.dataset.sound || 4.2) * 1000) }
     const lit = litNow()
-    if (n > 1 && n < 8 && lit.length === 1) later(() => tap(lit[0]), 1500)
+    if (SPOT[n] === LEFT && lit.length === 1) later(() => tap(lit[0]), 1500)
   }
   const litNow = () => [...document.querySelectorAll('#strip .on')].map(d => d.dataset.s)
   /** Runs to the sponsor that is working, jumps on its cell, and goes back. */
   let tapping = null
   function tap(name) {
-    if (!CELL[name] || i < 2 || i > 7 || !at) return
+    if (!CELL[name] || SPOT[i] !== LEFT || !at) return
     clearTimeout(tapping)
     const keep = pet.classList.contains('conduct')
     stand({ x: CELL[name], k: 0.4, face: 'down', b: name === 'modal' ? 'left' : 'right' }, 'down')
@@ -151,7 +156,7 @@
     later(home, 1500)
   }
   function uncover() {
-    if (!S[i].hasAttribute('data-step')) { shove(1); return setTimeout(uncover, 750) }
+    if (!S[i].hasAttribute('data-step')) { shove(IX('ab')); return setTimeout(uncover, 750) }
     hop(520); pose('hold', 420)
     setTimeout(() => S[i].classList.add('shown'), calm ? 0 : 260)
   }
@@ -178,9 +183,11 @@
   const WAKE = /\b(?:hey|hay|hi|he|okay|ok|o k)[\s,]+(?:study(?:ing|\s*o\.?\s*s\.?)?|studies|steady|studio|stuffy|candle|candles|kendall|kendal|camel|handle)\b/i
   const NUM = { one: 1, won: 1, two: 2, to: 2, too: 2, three: 3, four: 4, for: 4, five: 5, six: 6, seven: 7, eight: 8, ate: 8, nine: 9, ten: 10, eleven: 11, twelve: 12, thirteen: 13, fourteen: 14, fifteen: 15, sixteen: 16, seventeen: 17, eighteen: 18 }
   const GOES = [
-    [/\b(game|games)\b|with your hands/, 5], [/\b(seam|seams|seems|scene|scenes|source|sources|label|lesson facts)\b/, 4], [/\b(tutor|draw|draws|drawing|modal|model speaks|voice)\b/, 6], [/\b(exam|exams|teacher)\b/, 13], [/\b(signal|signals)\b/, 15], [/\bquiz(?:zes)?\b/, 12], [/\b(podcast|listen|short)\b/, 11], [/\b(handwriting|by hand|hand written|handwritten)\b/, 14], [/\b(calendar|meeting|meetings|session)\b/, 16],
-    [/\b(a|eight) (?:or|and|are|versus) (?:b|be|bee)\b|\ba ?\/ ?b\b/, 1], [/\b(sponsor|sponsors|who does what|what does what)\b/, 17], [/\b(qr|q r|cue are|code|scan|the end|last slide|try it)\b/, 9], [/\b(one page|showcase|faraday|real one)\b/, 3], [/\b(nobody wrote|ai article|it stops)\b/, 2], [/\b(features|everything|all of it)\b/, 7], [/\b(said no|no to|taste)\b/, 8], [/\b(kinds of slop|slop)\b/, 10], [/\b(start|beginning|title|first slide|top)\b/, 0]
-  ]
+    [/\b(game|games)\b|with your hands/, 'play'], [/\b(seam|seams|seems|scene|scenes|source|sources|label|lesson facts)\b/, 'seams'], [/\b(tutor|draw|draws|drawing|modal|model speaks|voice)\b/, 'tutor'],
+    [/\b(student and teacher|teacher and student|who uses|both sides|student side|teacher side)\b/, 'who'], [/\b(exam|exams)\b/, 'exam'], [/\b(handwriting|by hand|photo)\b/, 'hand'], [/\b(signal|signals)\b/, 'signals'], [/\b(meeting|meetings|calendar)\b/, 'meet'],
+    [/\b(a|eight) (?:or|and|are|versus) (?:b|be|bee)\b|\ba ?\/ ?b\b/, 'ab'], [/\b(sponsor|sponsors|who does what|what does what)\b/, 'what'], [/\b(feature|features|everything)\b/, 'features'], [/\b(qr|q r|cue are|code|scan|the end|last slide|try it)\b/, 'qr'],
+    [/\b(one page|showcase|real one|film|course)\b/, 'show'], [/\b(nobody|stop sign|fake)\b/, 'stop'], [/\b(quiz|quizzes)\b/, 'quiz'], [/\b(podcast|short|watch|listen)\b/, 'watch'], [/\b(two kinds|slop)\b/, 'two'], [/\b(start|beginning|title|first slide)\b/, 'title']
+  ].map(([re, k]) => [re, IX(k)]).filter(x => x[1] >= 0)
   /** {wake, rest, cmd, n}. rest is what came after the wake words; cmd is null when nothing fits. */
   function parse(text, awake) {
     const t = ' ' + String(text || '').toLowerCase().replace(/[.!?]/g, ' ').replace(/\s+/g, ' ').trim() + ' '
@@ -193,9 +200,10 @@
     if (/\b(go to sleep|stop listening|voice off|be quiet)\b/.test(rest)) return { ...out, cmd: 'sleep' }
     if (/\b(auto ?pilot|run the show|take over|you drive)\b/.test(rest)) return { ...out, cmd: 'auto' }
     if (/\bfull ?screen\b/.test(rest)) return { ...out, cmd: 'full' }
-    if (/\b(reveal|answer|which one|who wrote it|show us|uncover)\b/.test(rest)) return { ...out, cmd: 'reveal' }
+    if (/\b(reveal|answer|which one|who wrote it|uncover)\b/.test(rest)) return { ...out, cmd: 'reveal' }
     const g = GOES.find(([re]) => re.test(rest))
     if (g) return { ...out, cmd: 'go', n: g[1] }
+    if (/\bshow us\b/.test(rest)) return { ...out, cmd: 'reveal' }
     if (/\b(back|previous)\b/.test(rest)) return { ...out, cmd: 'back' }
     if (/\b(pause|hold|wait|freeze|stop)\b/.test(rest)) return { ...out, cmd: 'pause' }
     if (/\b(again|replay|rewind)\b/.test(rest)) return { ...out, cmd: 'again' }
@@ -241,17 +249,19 @@
   window.__hear = text => hear(text, true)
 
   /* ---- the microphone ------------------------------------------------------------------------------------------------------ */
-  const SR = window.SpeechRecognition || window.webkitSpeechRecognition
+  const SR = window.StudyEars || window.SpeechRecognition || window.webkitSpeechRecognition
   let rec = null, on = false, fails = 0, skip = false
   /* push to talk: hold V (or the candle), say it, let go. No wake words. */
   let ptt = false, words = '', sent = true, pttAt = 0, pttStop = 0, from = 0, count = 0
+  let inCall = false
   function down() {
-    if (ptt) return
+    if (ptt || inCall) return
     ptt = true; words = ''; sent = false; from = count; pttAt = Date.now()
     nod(); pet.classList.add('held', 'awake'); pet.classList.remove('sleep')
     clearTimeout(pttStop); pttStop = setTimeout(up, 12000)
     if (!SR) return say('Voice needs Chrome', 2600)
     say('Listening', 12000, false)
+    if (window.StudyEars) StudyEars.hold = true
     if (!rec) open()
   }
   function up() {
@@ -260,10 +270,11 @@
     pet.classList.remove('held', 'awake'); bubble.classList.remove('on')
     if (spot === NAP) pet.classList.add('sleep')
     if (!SR) { sent = true; return }
+    if (window.StudyEars) { StudyEars.hold = false; say('Hm', 1600, false) }
     if (!on && rec) { try { rec.stop() } catch (e) {} }
     const ok = parse(words, true).cmd
     setTimeout(() => settle(false), ok ? 260 : 900) // late words still count
-    setTimeout(() => settle(true), 1500)
+    setTimeout(() => settle(true), window.StudyEars ? 6000 : 1500)
   }
   function settle(last) {
     if (sent || ptt) return
@@ -293,7 +304,7 @@
       rec.onresult = e => {
         if (mine !== rec) return
         fails = 0; count = e.results.length
-        if (ptt || !sent) { const mineNow = [...e.results].slice(from); words = mineNow.map(r => r[0].transcript).join(' '); if (ptt) say(`<i>“</i>${esc(words.trim().slice(-34))}<i>”</i>`, 12000, false); else if (mineNow.every(r => r.isFinal)) settle(false); return }
+        if (ptt || !sent) { const mineNow = [...e.results].slice(from); words = mineNow.map(r => r[0].transcript).join(' '); if (ptt) say(`<i>“</i>${esc(words.trim().slice(-34))}<i>”</i>`, 12000, false); else if (window.StudyEars) settle(true); else if (mineNow.every(r => r.isFinal)) settle(false); return }
         if (!on) return
         for (let k = e.resultIndex; k < e.results.length; k++) {
           const r = e.results[k], t = r[0].transcript
@@ -324,14 +335,15 @@
   help.addEventListener('click', e => { e.stopPropagation(); help.classList.remove('on') })
 
   /* ---- autopilot: the whole show in 2:42 -------------------------------------------------------------------------------------- */
-  const PLAN = { 1: 20, 2: 14, 3: 26, 4: 25, 5: 22, 6: 20, 7: 11, 8: 14, 9: 10 }, REVEAL = 12
+  const SECS = { two: 7, ab: 18, stop: 8, show: 23, seams: 15, quiz: 8, play: 12, tutor: 19, watch: 7, who: 10, exam: 7, hand: 7, signals: 8, meet: 6, what: 6, features: 8, qr: 8 }, REVEAL = 8
+  const PLAN = Object.fromEntries(S.map((x, k) => [k, SECS[x.dataset.key] || 0]).filter(x => x[1]))
   const TOTAL = Object.values(PLAN).reduce((a, b) => a + b, 0)
   const fast = window.__speed || 1
   let auto = 0, t0 = 0, frame = 0
   function startAuto() {
     stopAuto(true)
     auto = 1; bar.classList.add('on'); t0 = performance.now()
-    if (i === 0 || i > 9) shove(1)
+    if (i === 0 || i >= LASTN) shove(1)
     const sofar = () => Object.keys(PLAN).filter(n => +n < i).reduce((a, n) => a + PLAN[n], 0)
     let here = i, since = performance.now(), told = false, was = i
     say('I’ve got this', 1800)
@@ -340,9 +352,9 @@
       if (here === -1) { if (i === was) { frame = requestAnimationFrame(tick); return } } if (i !== here) { here = i; was = i; since = performance.now() }
       const s = (performance.now() - since) / 1000 * fast
       bar.style.transform = `scaleX(${Math.min(1, (sofar() + Math.min(s, PLAN[here])) / TOTAL)})`
-      if (here === 1 && s > REVEAL && !told) { told = true; uncover() }
+      if (K(Math.max(0, here)) === 'ab' && here > 0 && s > REVEAL && !told) { told = true; uncover() }
       const v = clips()[0], playing = fast === 1 && v && !v.ended && !v.paused && v.duration - v.currentTime < 4
-      if (s >= PLAN[here] && !playing) { if (here >= 9) return stopAuto(true); here = -1; shove(i + 1) }
+      if (s >= PLAN[here] && !playing) { if (here >= LASTN) return stopAuto(true); here = -1; shove(i + 1) }
       frame = requestAnimationFrame(tick)
     }
     frame = requestAnimationFrame(tick)
@@ -355,11 +367,19 @@
     if (was) stopAuto()
     if (k === 'a' && !was) startAuto()
     else if (k === 'v') { if (!e.repeat) down() }
-    else if (k === 'l') listen(!on)
+    else if (k === 'l') { if (!inCall) listen(!on) }
     else if (k === 'h') help.classList.toggle('on')
     else if (k === 'escape') help.classList.remove('on')
   }, true)
   addEventListener('click', e => { if (auto && !pet.contains(e.target)) stopAuto() }, true)
+  window.__host = {
+    act, parse, pose, cheer, shrug, tap, hop, SR, esc,
+    say: (html, ms, talk) => say(html, ms, talk),
+    quiet: () => { bubble.classList.remove('on'); pet.classList.remove('say') },
+    face: (c, v) => pet.classList.toggle(c, v),
+    /** A call takes the microphone; hold-to-talk and hands-free step aside. */
+    busyMic: v => { if (v) { if (on) listen(false); if (rec) { const r = rec; rec = null; try { r.abort() } catch (x) {} } } inCall = v }
+  }
   window.__pet = { state: () => ({ i, on, awake: Date.now() < awakeUntil, auto: !!auto, total: TOTAL, cls: pet.className, bubble: bubble.classList.contains('on') ? bubble.textContent : '' }) }
   seen = i; spot = SPOT[i] || NAP; X.x = spot.x; X.k = spot.k; visit(i)
 })()

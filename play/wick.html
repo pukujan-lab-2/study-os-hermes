@@ -103,6 +103,8 @@
   G.goal = function (s) { if (s !== goal) { goal = s; goalAt = G.t; } };
   G.toast = function (s, secs) { toast = { s: s, t: G.t, d: secs || 1.9 }; };
   G.gauge = function (v, label, color, zone) { gauge = { v: gauge ? G.lerp(gauge.v, v, Math.min(1, G.dt * 9)) : v, label: label, color: color || '#2f3cdc', zone: zone }; };
+  /** What is happening right now and why, in a line along the bottom. Call it whenever the state changes. */
+  G.why = function (s) { if (s && s !== why) { why = s; whyAt = G.t; } };
   G.hint = function (x, y, x2, y2) { hint = [x, y, x2 == null ? x : x2, y2 == null ? y : y2]; };
   function start() { changing = false; gauge = null; for (var k in bodies) delete bodies[k]; if (G.onLevel) G.onLevel(G.level); }
   G.win = function (s) {
@@ -120,6 +122,12 @@
     if (toast) { var a = (G.t - toast.t) / toast.d; if (a > 1) toast = null; else { var s = G.ease(Math.min(1, a * 5)), f = a > 0.8 ? (1 - a) * 5 : 1; c.save(); c.globalAlpha = f; c.translate(G.W / 2, G.H * 0.3); c.scale(0.6 + 0.4 * s, 0.6 + 0.4 * s); c.font = '800 30px Inter,system-ui,sans-serif'; var tw = Math.min(G.W - 30, c.measureText(toast.s).width + 60); G.box(-tw / 2, -34, tw, 68, 26, '#ffc93c', { shadow: 6, shine: false, line: 4 }); var fz = 30; while (fz > 15 && c.measureText(toast.s).width > tw - 36) { fz -= 2; c.font = '800 ' + fz + 'px Inter,system-ui,sans-serif'; } G.text(toast.s, 0, 2, fz); c.restore(); } }
     if (again) { c.fillStyle = 'rgba(250,248,243,.8)'; c.fillRect(-30, -30, G.W + 60, G.H + 60); G.text('You made it work', G.W / 2, G.H / 2 - 30, G.tall ? 44 : 62); G.text(goal2 || '', G.W / 2, G.H / 2 + 32, 20, '#5c5b57'); G.box(G.W / 2 - 100, G.H / 2 + 92, 200, 60, 30, '#2f3cdc', { shadow: 6, shine: false }); G.text('Play again', G.W / 2, G.H / 2 + 123, 24, '#fff'); if (Math.random() < 0.06) G.puff(G.rand(0, G.W), -10, { n: 4, angle: 1.57, spread: 0.6, speed: 160, gravity: 120, size: 8, life: 2.4, kind: 'paper', color: ['#2f3cdc', '#ffc93c', '#f39ac3', '#f26b2e'] }); }
   }
+  var why = '', whyAt = 0;
+  function lines(s, max, size) { c.font = '700 ' + size + 'px "SO Inter",Inter,system-ui,sans-serif'; var out = [''], ws = s.split(' '); for (var i = 0; i < ws.length; i++) { var t = out[out.length - 1] ? out[out.length - 1] + ' ' + ws[i] : ws[i]; if (c.measureText(t).width > max && out[out.length - 1]) out.push(ws[i]); else out[out.length - 1] = t; } return out; }
+  function whyBar() {
+    if (!why || again) return; var size = G.tall ? 18 : 21, max = Math.min(G.W - (G.tall ? 60 : 270), 620), ls = lines(why, max, size), w = 0; ls.forEach(function (l) { w = Math.max(w, c.measureText(l).width); });
+    var h = ls.length * (size + 6) + 22, p = G.ease((G.t - whyAt) / 0.35), y = G.H - h - (G.tall ? 54 : 12); c.save(); c.globalAlpha = p; G.box(G.W / 2 - w / 2 - 20, y + (1 - p) * 10, w + 40, h, 16, '#ffc93c', { shadow: 4, shine: false, line: 3 }); ls.forEach(function (l, i) { c.font = '700 ' + size + 'px "SO Inter",Inter,system-ui,sans-serif'; c.textAlign = 'center'; c.textBaseline = 'middle'; c.fillStyle = INK; c.fillText(l, G.W / 2, y + (1 - p) * 10 + 11 + (i + 0.5) * (size + 6)); }); c.restore();
+  }
   var goal2 = '', last = 0; G.frame = 0; G.dt = 0.016; G.lesson = function (s) { goal2 = s; };
   G.run = function (update, draw) {
     if (typeof update === 'object' && update) { draw = update.draw; update = update.update; }
@@ -129,7 +137,7 @@
       var dt = Math.min(0.034, (now - last) / 1000 || 0.016); last = now; G.dt = dt; G.t += dt; G.frame++; shake *= Math.pow(0.0008, dt); flash *= Math.pow(0.01, dt);
       if (!again && update) update(dt, G.playing());
       c.setTransform(zoom, 0, 0, zoom, 0, 0); c.globalAlpha = 1; c.clearRect(0, 0, G.W, G.H); c.save(); if (shake > 0.4) c.translate(G.rand(-shake, shake), G.rand(-shake, shake));
-      draw(update ? c : dt, G.playing()); parts(dt); c.restore(); if (flash > 0.02) { c.globalAlpha = flash * 0.5; c.fillStyle = '#fff'; c.fillRect(0, 0, G.W, G.H); c.globalAlpha = 1; } hud(dt);
+      draw(update ? c : dt, G.playing()); parts(dt); c.restore(); if (flash > 0.02) { c.globalAlpha = flash * 0.5; c.fillStyle = '#fff'; c.fillRect(0, 0, G.W, G.H); c.globalAlpha = 1; } whyBar(); hud(dt);
       if (again) parts(0); requestAnimationFrame(loop);
     })(0);
   };
@@ -169,6 +177,7 @@ G.run(dt => {
   s.hold = fed ? s.hold + dt : Math.max(0, s.hold - dt);
   s.fed = fed;
   G.gauge(G.clamp(s.reach / m.need, 0, 1), 'wax reaches tip', fed ? '#1a7748' : '#2f3cdc', [.98, 1]);
+  G.why(fed ? 'Thin gaps pull melted wax all the way up, so the flame is fed' : s.twist < .25 ? 'Wide gaps hardly pull: the wax stays low and the flame starves' : s.char > .5 ? 'A dry wick burns itself. Tighter gaps pull wax higher' : 'Tighter gaps pull harder, so the wax climbs higher');
   if (s.hold > 2 && G.playing()) { G.lesson('Capillary action pulls melted wax up the wick to feed the flame.'); G.win('Wax climbs the wick'); }
   if (s.char >= 1 && G.playing()) { G.fail('Dry wick burned down'); s.char = 0; s.hold = 0; }
 }, c => {
