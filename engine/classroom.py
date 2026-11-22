@@ -12,6 +12,7 @@ from urllib.parse import quote
 
 from . import llm, prompts, services, store, voice
 from .courses import Problem, _changed, background
+from .place import here
 from .store import db, get_prefs, loads, new_id, now, row, rows, run
 
 _S = {"type": "string"}
@@ -32,7 +33,8 @@ MARKER = f"""You suggest marks to a teacher. Judge the ideas against the guide, 
 # ---- the class folder ------------------------------------------------------------------------------------------
 
 def folder() -> Path:
-    want = str(get_prefs().get("class_folder") or "").strip()
+    at = here.get()
+    want = "" if at else str(get_prefs().get("class_folder") or "").strip()
     p = Path(want).expanduser() if want else voice.data_dir("class")
     if not p.is_dir():
         if want:
@@ -218,6 +220,9 @@ def desk() -> dict:
 # ---- the student -------------------------------------------------------------------------------------------------------
 
 def me() -> dict:
+    at = here.get()
+    if at:
+        return {"id": "", "name": "", "email": "", "teacher": "", **at.me}
     p = get_prefs()
     return {"id": p.get("student_id") or "", "name": p.get("student_name") or "", "email": p.get("student_email") or "", "teacher": p.get("teacher_email") or ""}
 
@@ -232,7 +237,10 @@ def work() -> dict:
         back = bool(s and s["status"] == "returned")
         qs = [{k: q[k] for k in ("id", "kind", "prompt", "options", "points") if k in q} for q in loads(a["questions"], [])]
         out.append({**{k: a[k] for k in ("id", "title", "kind", "instructions", "due", "minutes", "source_name")}, "questions": qs, "mine": {"status": s["status"], "answers": loads(s["answers"], {}), "process": loads(s["process"], {}), "started_at": s["started_at"], "handed_in_at": s["handed_in_at"], "marks": loads(s["marks"], {}) if back else {}, "comment": s["comment"] if back else None} if s else None})
-    return {"me": who, "work": out, "meetings": rows("select * from meetings order by start"), "services": services.status()}
+    meetings = rows("select * from meetings order by start")
+    if here.get() and not here.get().teacher:  # a class of many: only the ones this student is in
+        meetings = [m for m in meetings if who["name"] and who["name"] in loads(m["who"], [])]
+    return {"me": who, "work": out, "meetings": meetings, "services": services.status()}
 
 
 def save(aid: str, answers: dict, process: dict, hand_in: bool) -> None:
@@ -250,7 +258,7 @@ def save(aid: str, answers: dict, process: dict, hand_in: bool) -> None:
     if hand_in:
         s = row("select * from submissions where assignment_id = ? and student_id = ?", aid, who["id"])
         name = re.sub(r"[^a-z0-9]+", "-", who["name"].lower()).strip("-") or "student"
-        (folder() / "handed-in" / f"{name}-{aid}.studyos.json").write_text(json.dumps({"id": s["id"], "assignment_id": aid, "student_id": who["id"], "student_name": who["name"], "email": who["email"], "answers": clean, "process": proc, "started_at": s["started_at"], "handed_in_at": s["handed_in_at"]}, indent=1), encoding="utf-8")
+        (folder() / "handed-in" / f"{name}-{aid}-{who['id'][:6]}.studyos.json").write_text(json.dumps({"id": s["id"], "assignment_id": aid, "student_id": who["id"], "student_name": who["name"], "email": who["email"], "answers": clean, "process": proc, "started_at": s["started_at"], "handed_in_at": s["handed_in_at"]}, indent=1), encoding="utf-8")
 
 
 # ---- meetings and email: ready-filled Google Calendar and Gmail pages, so no sign-in is stored here --------------------------

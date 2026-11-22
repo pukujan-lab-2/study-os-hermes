@@ -11,6 +11,7 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 
 from . import PLUGIN
+from .place import here
 
 SCHEMA = """
 create table if not exists courses (
@@ -86,7 +87,8 @@ def new_id() -> str:
 
 
 def _connect() -> sqlite3.Connection:
-    path = os.environ.get("STUDYOS_SOLO_DB")
+    at = here.get()
+    path = str(at.db) if at else os.environ.get("STUDYOS_SOLO_DB")
     if path:
         c = sqlite3.connect(path, check_same_thread=False, timeout=20)
     else:

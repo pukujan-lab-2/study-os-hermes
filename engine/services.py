@@ -14,6 +14,7 @@ import uuid
 import wave
 
 from . import PLUGIN, store
+from .place import spend
 
 REDUCTO = "https://platform.reducto.ai"
 PANGRAM = "https://text.external-api.pangram.com"
@@ -92,6 +93,7 @@ def reducto(data: bytes, name: str, mime: str = "application/pdf") -> str:
     known = store.saved_key("reducto", data)
     if (old := store.recall(known)) and store.recall(store.saved_key("blocks", data)) is not None:  # the same file is never sent, or paid for, twice
         return old
+    spend("reducto")
     base, auth = _safe(setting("reducto_url", REDUCTO)), {"Authorization": f"Bearer {key}"}
     mark = uuid.uuid4().hex
     safe_name = "".join(ch if ch.isalnum() or ch in "._-" else "_" for ch in name)[:80] or "document"
@@ -154,6 +156,7 @@ def pangram(text: str) -> dict:
     known = store.saved_key("pangram", text)
     if old := store.recall(known):
         return {**old, "saved": True}
+    spend("pangram")
     base, h = _safe(setting("pangram_url", PANGRAM)), {"x-api-key": key}
     t = _json("POST", f"{base}/task", h, {"text": text}, timeout=20)
     task, end = t.get("task_id"), time.time() + 40

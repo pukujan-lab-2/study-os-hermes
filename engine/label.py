@@ -3,6 +3,7 @@ model points at the source; code checks that every line it points at is really t
 
 from __future__ import annotations
 
+import os
 import re
 
 from . import llm, prompts, services
@@ -83,6 +84,8 @@ def found_in(quote: str, source: str) -> bool:
 
 
 def _model() -> str:
+    if os.environ.get("STUDYOS_MODEL_NAME"):
+        return os.environ["STUDYOS_MODEL_NAME"]
     try:
         from hermes_cli.config import load_config  # type: ignore
 

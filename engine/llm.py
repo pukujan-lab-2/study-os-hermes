@@ -6,6 +6,7 @@ import json
 import re
 
 from . import PLUGIN
+from .place import spend
 
 _llm = None
 TASK = "study_os_solo"  # its own row in Hermes' auxiliary models: low thinking, so lessons and drawings come quickly
@@ -15,6 +16,7 @@ _task_ok = True
 def _call(fn, **k):
     """One model call, on this plugin's own Hermes task when it is registered here."""
     global _task_ok
+    spend("model")
     if _task_ok:
         try:
             return fn(task=TASK, **k)
@@ -65,6 +67,8 @@ def text(system: str, user: str, *, max_tokens: int = 7000, purpose: str = "less
             if out.strip():
                 return out
             err: Exception = ValueError("an empty reply")
+        except ModelError:
+            raise
         except Exception as e:  # noqa: BLE001 - every provider fails its own way
             err = e
     raise ModelError(_explain(err))
@@ -101,6 +105,8 @@ def data(system: str, user: str, schema: dict, *, max_tokens: int = 7000, purpos
                 err: Exception = ValueError(f"the reply had no {', '.join(missing)}")
             else:
                 err = ValueError("the reply wasn't JSON")
+        except ModelError:
+            raise
         except Exception as e:  # noqa: BLE001
             err = e
         note = f"\n\nYour last reply couldn't be used ({str(err)[:200]}). Reply with only a JSON object that fits the schema."

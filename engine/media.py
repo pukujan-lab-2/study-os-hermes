@@ -12,6 +12,7 @@ import subprocess
 from pathlib import Path
 
 from . import film, llm, play, prompts, voice
+from .place import here
 from .courses import Problem, _changed, background
 from .store import db, loads, new_id, now, row, rows, run
 
@@ -221,6 +222,8 @@ def project(section_id: str, kind: str) -> Path:
 
 
 def export(section_id: str, kind: str, render: bool) -> dict:
+    if here.get():
+        raise Problem("Saving videos works in the Hermes version.")
     d = project(section_id, kind)
     if not render:
         return {"folder": str(d)}

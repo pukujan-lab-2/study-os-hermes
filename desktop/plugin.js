@@ -971,7 +971,7 @@ function WhoAmI({ ctx, me, onDone }) {
   const [email, setEmail] = useState(me.email)
   const [teacher, setTeacher] = useState(me.teacher)
   const save = async () => { await ctx.rest('/prefs', { method: 'POST', body: { student_id: me.id || Math.random().toString(16).slice(2, 10) + Date.now().toString(16).slice(-8), student_name: name.trim(), student_email: email.trim(), teacher_email: teacher.trim() } }); onDone() }
-  return h('div.so-card.so-in', h('h2', 'Who are you?'), h('div.so-how', h('label', h('span.so-label', 'Your name'), h('input.so-input', { value: name, onChange: e => setName(e.target.value) })), h('label', h('span.so-label', 'Your email'), h('input.so-input', { value: email, type: 'email', onChange: e => setEmail(e.target.value) })), h('label', h('span.so-label', 'Teacher’s email'), h('input.so-input', { value: teacher, type: 'email', onChange: e => setTeacher(e.target.value) }))), h('div.so-row.so-end', h(Btn, { kind: 'main', disabled: !name.trim(), onClick: save }, 'Save')))
+  return h('div.so-card.so-in', h('h2', 'Who are you?'), h('div.so-how', h('label', h('span.so-label', 'Your name'), h('input.so-input', { value: name, onChange: e => setName(e.target.value) })), !ctx.web && h('label', h('span.so-label', 'Your email'), h('input.so-input', { value: email, type: 'email', onChange: e => setEmail(e.target.value) })), !ctx.web && h('label', h('span.so-label', 'Teacher’s email'), h('input.so-input', { value: teacher, type: 'email', onChange: e => setTeacher(e.target.value) }))), h('div.so-row.so-end', h(Btn, { kind: 'main', disabled: !name.trim(), onClick: save }, 'Save')))
 }
 function ClassPage({ ctx }) {
   const { data, refetch } = useClass(ctx)
@@ -1422,7 +1422,7 @@ function Page({ ctx }) {
   return h('div.so-root', { className: cls('so-root', look) },
     h('div.so-top', h('button.so-logo', { type: 'button', onClick: () => go('home') }, 'Study', h('em', 'os')),
       h('nav', { 'aria-label': 'Study OS' }, [['home', 'Courses'], ['show', 'Showcase'], ['known', 'What you know'], ['essay', 'Essay check'], ['class', 'Class']].map(([k, t]) => h('button', { key: k, type: 'button', 'aria-current': name === k ? 'page' : undefined, onClick: () => go(k) }, t)), home && home.due > 0 && h('button', { type: 'button', 'aria-current': name === 'review' ? 'page' : undefined, onClick: () => go('review') }, 'Review', h('span.so-badge', home.due))),
-      h('span.so-grow'), h(IconBtn, { icon: 'sliders', label: 'Set up', onClick: () => go('setup') }), h(IconBtn, { icon: 'look', label: 'Change the look', onClick: () => { const n = { sticker: 'studio', studio: 'hermes', hermes: 'sticker' }[look] || 'sticker'; setLook(n); if (ctx.storage) ctx.storage.set('look', n) } }), h(Btn, { kind: 'main', icon: 'plus', onClick: () => go('new') }, 'New')),
+      h('span.so-grow'), !ctx.web && h(IconBtn, { icon: 'sliders', label: 'Set up', onClick: () => go('setup') }), h(IconBtn, { icon: 'look', label: 'Change the look', onClick: () => { const n = { sticker: 'studio', studio: 'hermes', hermes: 'sticker' }[look] || 'sticker'; setLook(n); if (ctx.storage) ctx.storage.set('look', n) } }), h(Btn, { kind: 'main', icon: 'plus', onClick: () => go('new') }, 'New')),
     h('div.so-body', { key: `${name}:${view.id || ''}` }, body))
 }
 

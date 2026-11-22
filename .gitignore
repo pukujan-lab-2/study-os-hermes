@@ -4,3 +4,7 @@ __pycache__/
 *.db-*
 .env*
 .DS_Store
+web/static/app.js
+web/seed/voice/
+web/seed/class/
+web/seed/data.db*

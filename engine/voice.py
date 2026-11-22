@@ -16,6 +16,7 @@ import wave
 from pathlib import Path
 
 from . import PLUGIN, services
+from .place import here, spend
 
 CACHE_BYTES = 300_000_000
 MODAL_VOICES = {"a": "af_heart", "b": "am_michael"}
@@ -23,7 +24,8 @@ MAC_VOICES = {"a": ("Samantha", "Allison", "Ava"), "b": ("Daniel", "Tom", "Alex"
 
 
 def data_dir(name: str) -> Path:
-    root = os.environ.get("STUDYOS_SOLO_DATA")
+    at = here.get()
+    root = str(at.shared if name == "voice" else at.data) if at else os.environ.get("STUDYOS_SOLO_DATA")
     if root:
         p = Path(root) / name
     else:
@@ -93,6 +95,7 @@ def say(text: str, who: str = "a") -> bytes | None:
     wav = None
     if modal and services.modal_warm():  # asleep: this computer's voice now, Modal's once it's up
         try:
+            spend("voice")
             wav = services.modal_tts(text, kind.split(":", 1)[1])
         except services.ServiceError:
             wav = None  # asleep or out of credit: this computer's voice carries on
@@ -127,6 +130,7 @@ def hear(wav: bytes) -> str:
         raise services.ServiceError("That recording couldn't be read.")
     if services.status()["modal"]:
         try:
+            spend("voice")
             return services.modal_stt(wav)
         except services.ServiceError:
             pass
