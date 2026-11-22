@@ -1,9 +1,10 @@
 name: study-os-solo
-version: 0.1.1
+version: 0.1.2
 manifest_version: 2
 api_version: 1
 description: Make a course from a topic or your own material, read it, quiz yourself, review at the right time and explain it back. Local, no account.
 author: Study OS
+license: MIT
 homepage: https://github.com/pukujan-lab-2/study-os-hermes
 tags: [learning, study, quiz, education]
 python_dependencies:

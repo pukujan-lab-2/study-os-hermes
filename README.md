@@ -51,3 +51,7 @@ hermes plugins validate .
 ```
 
 This is the solo edition. Classes, live rooms, videos and the full catalog are part of the full Study OS, which is not in this repository.
+
+## License
+
+[MIT](LICENSE)
