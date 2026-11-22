@@ -38,23 +38,24 @@
 
   /* ---- scene ---- */
   G.room = function (top, bottom, floor) {
-    var g = c.createLinearGradient(0, 0, 0, G.H); g.addColorStop(0, top || '#dfe3ff'); g.addColorStop(1, bottom || '#faf8f3'); c.fillStyle = g; c.fillRect(-30, -30, G.W + 60, G.H + 60);
+    c.fillStyle = top || '#dfe3ff'; c.fillRect(-30, -30, G.W + 60, G.H + 60);
+    c.fillStyle = bottom || '#faf8f3'; c.beginPath(); c.moveTo(-30, G.H * 0.62); for (var bx = 0; bx <= 12; bx++) c.lineTo(bx / 12 * (G.W + 60) - 30, G.H * 0.62 + Math.sin(bx * 1.1 + G.t * 0.25) * 16); c.lineTo(G.W + 30, G.H + 30); c.lineTo(-30, G.H + 30); c.fill();
     for (var i = 0; i < motes.length; i++) { var m = motes[i], x = (m[0] * G.W + Math.sin(G.t * 0.3 + i) * 26 + G.t * 6 * m[2]) % G.W, y = (m[1] * G.H - G.t * (4 + m[2] * 9)) % G.H; if (y < 0) y += G.H; c.globalAlpha = 0.16 + 0.22 * m[2]; c.fillStyle = '#fff'; c.beginPath(); c.arc(x, y, 1.5 + m[2] * 3, 0, 7); c.fill(); } c.globalAlpha = 1;
     if (floor) { var fy = G.H * 0.84; c.fillStyle = floor; c.fillRect(-30, fy, G.W + 60, G.H); c.fillStyle = INK; c.fillRect(-30, fy - 1.5, G.W + 60, 3); }
   };
-  G.night = function (floor) { G.room('#171b4d', '#5b3a86', floor || '#2a2350'); };
-  G.glow = function (x, y, r, color, a) { var g = c.createRadialGradient(x, y, 0, x, y, r); g.addColorStop(0, color); g.addColorStop(1, 'rgba(255,255,255,0)'); var o = c.globalAlpha, m = c.globalCompositeOperation; c.globalAlpha = o * (a == null ? 0.5 : a); c.fillStyle = g; c.beginPath(); c.arc(x, y, r, 0, 7); c.fill(); c.globalAlpha = o; c.globalCompositeOperation = m; };
+  G.night = function (floor) { G.room('#1d2266', '#2b2f86', floor || '#15184a'); };
+  G.glow = function (x, y, r, color, a) { var o = c.globalAlpha, k = a == null ? 0.5 : a; c.fillStyle = color; [1, 0.7, 0.42].forEach(function (q, i) { c.globalAlpha = o * k * 0.3; c.beginPath(); c.arc(x, y, r * q * (1 + Math.sin(G.t * 3 + i) * 0.025), 0, 7); c.fill(); }); c.globalAlpha = o; };
   /** A sticker: outline, flat or gradient fill, hard shadow. path(c) draws the shape. */
   G.sticker = function (path, fill, o) {
     o = o || {}; var s = o.shadow == null ? 5 : o.shadow;
     if (s) { c.save(); c.translate(s, s); c.beginPath(); path(c); c.fillStyle = INK; c.fill(); c.restore(); }
     c.beginPath(); path(c); c.fillStyle = fill; c.fill();
-    if (o.shine !== false) { c.save(); c.clip(); c.globalAlpha = 0.28; c.fillStyle = '#fff'; c.beginPath(); var b = o.box; if (b) { c.ellipse(b[0] + b[2] * 0.3, b[1] + b[3] * 0.22, b[2] * 0.26, b[3] * 0.13, -0.5, 0, 7); c.fill(); } c.restore(); }
+    if (o.shine !== false) { c.save(); c.clip(); c.globalAlpha = 0.3; c.fillStyle = '#fff'; c.beginPath(); var b = o.box; if (b) { c.ellipse(b[0] + b[2] * 0.3, b[1] + b[3] * 0.22, b[2] * 0.26, b[3] * 0.13, -0.5, 0, 7); c.fill(); } c.restore(); }
     c.lineWidth = o.line || 3.5; c.lineJoin = 'round'; c.strokeStyle = INK; c.beginPath(); path(c); c.stroke();
   };
   G.box = function (x, y, w, h, r, fill, o) { G.sticker(function (k) { k.roundRect(x, y, w, h, r); }, fill, Object.assign({ box: [x, y, w, h] }, o)); };
   G.ball = function (x, y, r, fill, o) { G.sticker(function (k) { k.arc(x, y, r, 0, Math.PI * 2); }, fill, Object.assign({ box: [x - r, y - r, r * 2, r * 2] }, o)); };
-  G.grad = function (x, y, x2, y2, a, b) { var g = c.createLinearGradient(x, y, x2, y2); g.addColorStop(0, a); g.addColorStop(1, b); return g; };
+  G.grad = function (x, y, x2, y2, a) { return a; }; // flat on purpose
   G.flame = function (x, y, s, heat) {
     heat = heat == null ? 1 : heat; if (heat <= 0.02) return; var f = Math.sin(G.t * 11) * 0.05 + Math.sin(G.t * 23) * 0.03, h = s * (0.8 + heat * 0.9) * (1 + f);
     G.glow(x, y - h * 0.45, s * (1.6 + heat * 2.4), '#ffb03b', 0.55); G.glow(x, y - h * 0.4, s * 1.2, '#fff3c4', 0.6);
@@ -121,12 +122,14 @@
   }
   var goal2 = '', last = 0; G.frame = 0; G.dt = 0.016; G.lesson = function (s) { goal2 = s; };
   G.run = function (update, draw) {
+    if (typeof update === 'object' && update) { draw = update.draw; update = update.update; }
+    if (typeof draw !== 'function') { draw = update; update = null; } // one function that does both
     start();
     (function loop(now) {
       var dt = Math.min(0.034, (now - last) / 1000 || 0.016); last = now; G.dt = dt; G.t += dt; G.frame++; shake *= Math.pow(0.0008, dt); flash *= Math.pow(0.01, dt);
       if (!again && update) update(dt, G.playing());
       c.setTransform(zoom, 0, 0, zoom, 0, 0); c.globalAlpha = 1; c.clearRect(0, 0, G.W, G.H); c.save(); if (shake > 0.4) c.translate(G.rand(-shake, shake), G.rand(-shake, shake));
-      draw(c); parts(dt); c.restore(); if (flash > 0.02) { c.globalAlpha = flash * 0.5; c.fillStyle = '#fff'; c.fillRect(0, 0, G.W, G.H); c.globalAlpha = 1; } hud(dt);
+      draw(update ? c : dt, G.playing()); parts(dt); c.restore(); if (flash > 0.02) { c.globalAlpha = flash * 0.5; c.fillStyle = '#fff'; c.fillRect(0, 0, G.W, G.H); c.globalAlpha = 1; } hud(dt);
       if (again) parts(0); requestAnimationFrame(loop);
     })(0);
   };
