@@ -17,6 +17,8 @@ const call = async (url, o = {}) => {
 }
 const said = e => { try { return JSON.parse(String(e.message).replace(/^\d+:\s*/, '')).detail } catch { return 'That didn’t work. Try again.' } }
 const ctx = { web: true, registerMany: x => items.push(...x), onDispose() {}, os: { openExternal: u => window.open(u, '_blank', 'noopener') }, onEvent: () => () => {}, storage: keep, rest: (p, o) => call('/api/plugins/study-os-solo' + p, o) }
+ctx.openTeacher = () => window.dispatchEvent(new CustomEvent('so-role', { detail: 'teacher' }))
+ctx.openStudy = () => window.dispatchEvent(new CustomEvent('so-role', { detail: 'student' }))
 plugin.register(ctx)
 const route = end => items.find(i => i.area === 'routes' && i.data.path.endsWith('teacher') === end)
 const client = new QueryClient()
@@ -62,7 +64,9 @@ function App() {
     }
     first()
     const t = setInterval(load, 15000)
-    return () => clearInterval(t)
+    const turn = e => setRole(e.detail)
+    window.addEventListener('so-role', turn)
+    return () => { clearInterval(t); window.removeEventListener('so-role', turn) }
   }, [])
   if (!info) return h('div', { className: 'wb-wait' }, 'Study ', h('b', null, 'os'))
   return h('div', { className: 'wb-all' }, h(Bar, { info, role, setRole, load, say }), h('main', { key: `${role}${info.joined}${info.code}` }, route(role === 'teacher' && !info.joined).render()), toast && h('div', { className: 'wb-toast', role: 'status' }, toast))

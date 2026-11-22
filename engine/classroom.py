@@ -10,7 +10,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import quote
 
-from . import llm, prompts, services, store, voice
+from . import llm, progress, prompts, services, store, voice
 from .courses import Problem, _changed, background
 from .place import here
 from .store import db, get_prefs, loads, new_id, now, row, rows, run
@@ -99,19 +99,26 @@ def make(*, kind: str, name: str, text: str, read_by: str, due: str | None, minu
     if len(text.strip()) < 200:
         raise Problem("There isn't enough text to make work from.")
     aid = new_id()
-    run("insert into assignments (id, title, kind, due, minutes, questions, source_name, read_by, status, created_at) values (?,?,?,?,?,'[]',?,?,'making',?)", aid, name or "New work", kind, due, minutes, name, read_by, now())
+    run("insert into assignments (id, title, kind, due, minutes, questions, source_name, read_by, status, created_at, beat, stage) values (?,?,?,?,?,'[]',?,?,'making',?,?,'Reading the document|0.05')", aid, name or "New work", kind, due, minutes, name, read_by, now(), now())
 
     def work():
-        try:
-            known = store.saved_key("paper", kind, text[:30000])
-            out = store.recall(known) or llm.data(MAKE, f"Make: {kind}\n\n<document name=\"{name}\">\n{text[:30000]}\n</document>", PAPER, purpose="assignment")
-            qs = clean_questions(out["questions"])
-            if not qs:
-                raise Problem("It came back without usable questions. Try again.")
-            store.remember(known, out)
-            run("update assignments set title = ?, instructions = ?, questions = ?, status = 'draft' where id = ?", out["title"][:160], out["instructions"][:600], json.dumps(qs), aid)
-        except Exception as err:  # noqa: BLE001
-            run("update assignments set status = 'failed', error = ? where id = ?", str(err)[:300], aid)
+        with progress.alive("assignments", aid):
+            try:
+                known = store.saved_key("paper", kind, text[:30000])
+                out = store.recall(known)
+                qs = clean_questions(out["questions"]) if out else []
+                for again in range(2):
+                    if qs:
+                        break
+                    progress.stage("assignments", aid, "Writing it again" if again else "Writing the questions", 0.1 + 0.3 * again)
+                    out = llm.data(MAKE, f"Make: {kind}\n\n<document name=\"{name}\">\n{text[:30000]}\n</document>", PAPER, purpose="assignment")
+                    qs = clean_questions(out["questions"])
+                if not qs:
+                    raise Problem("The model wrote no usable questions. Give it another go.")
+                store.remember(known, out)
+                run("update assignments set title = ?, instructions = ?, questions = ?, status = 'draft', done_at = ? where id = ?", out["title"][:160], out["instructions"][:600], json.dumps(qs), now(), aid)
+            except Exception as err:  # noqa: BLE001
+                run("update assignments set status = 'failed', error = ?, done_at = ? where id = ?", str(err)[:300], now(), aid)
         _changed(aid)
 
     def source():
@@ -199,12 +206,13 @@ def give_back(sid: str, marks: dict, comment: str) -> None:
 
 
 def _full(a: dict) -> dict:
-    return {**{k: a[k] for k in ("id", "title", "kind", "instructions", "due", "minutes", "source_name", "read_by", "status", "error")}, "questions": loads(a["questions"], []), "source": loads(a["source_check"], None)}
+    return {**{k: a[k] for k in ("id", "title", "kind", "instructions", "due", "minutes", "source_name", "read_by", "status", "error")}, "questions": loads(a["questions"], []), "source": loads(a["source_check"], None), "progress": {"seconds": round(progress.seconds(a["created_at"]), 1), "typical": progress.TYPICAL["exam" if a["kind"] == "exam" else "assignment"], "stage": progress.stage_of(a["stage"])[0], "share": progress.stage_of(a["stage"])[1]} if a["status"] == "making" else None}
 
 
 def desk() -> dict:
     """Everything the teacher's page shows."""
     sync()
+    progress.stopped_work()
     auto = [s["id"] for s in rows("select id from submissions where status = 'handed_in' and check_status is null")]
     for x in auto:
         check(x)

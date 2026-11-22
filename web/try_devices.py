@@ -100,6 +100,7 @@ ok("another device sees none of this", all(x["id"] != aid for x in other.get(P +
 ok("leaving goes back to your own space", ann.post("/api/space/leave").get("ok") and all(x["id"] != aid for x in ann.get(P + "/class")["work"]))
 ok("another site can't write", ann.post(P + "/prefs", {"student_name": "x"}, headers={"origin": "https://example.com"}).get("error") == 403)
 ok("saving videos is off here", "Hermes" in str(teacher.post(f"{P}/sections/{teacher.get(P + '/courses/' + cid)['list'][0]['id']}/export", {"kind": "explainer"}).get("detail", "Hermes")))
+ok("what is being made can be asked", "making" in teacher.get(P + "/making"))
 ok("the label is saved", teacher.get(f"{P}/sections/{teacher.get(P + '/courses/' + cid)['list'][0]['id']}/label").get("choices") is not None)
 
 if LIVE:

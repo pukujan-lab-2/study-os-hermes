@@ -15,7 +15,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from engine import classroom, courses, essay, film, ingest, label, llm, mastery, media, play, quiz, services, store, tutor, voice  # noqa: E402
+from engine import classroom, courses, essay, film, ingest, label, llm, mastery, media, play, progress, quiz, services, store, tutor, voice  # noqa: E402
 
 QUIZ = {
     "objectives": [
@@ -405,6 +405,69 @@ class Media(Case):
         store.run("update sections set body = 'new words' where id = ?", s["id"])
         self.assertTrue(media.listing(s["id"])[0]["stale"])
         self.assertEqual({t["who"] for t in self.ready(s["id"], "recap")["data"]["turns"]}, {"a"})
+
+    def test_a_recap_that_comes_back_as_one_block_or_too_short_still_gets_made(self):
+        s = self.made()["list"][0]
+        long = "Wax climbs the wick because the gaps are thin. The heat melts it first. Then it boils and the gas burns. The flame feeds itself. So a candle is a small machine. Remember the wick."
+        real, replies, asked = llm.data, [{"title": "R", "turns": [{"who": "a", "text": "Wax burns."}]}, {"title": "R", "turns": [{"who": "a", "text": long}]}], []
+        llm.data = lambda system, user, *a, **k: (asked.append(user), replies[min(len(asked) - 1, 1)])[1]
+        try:
+            m = self.ready(s["id"], "recap")
+        finally:
+            llm.data = real
+        self.assertEqual((m["status"], len(asked)), ("ready", 2))
+        self.assertIn("too short", asked[1])
+        self.assertGreaterEqual(len(m["data"]["turns"]), 4)
+        llm.data = lambda *a, **k: {"title": "R", "turns": []}
+        try:
+            self.assertIn("Give it another go", self.ready(s["id"], "recap")["error"])
+        finally:
+            llm.data = real
+
+    def test_making_says_how_far_along_and_what_just_finished(self):
+        s = self.made()["list"][0]
+        gate, real = threading.Event(), llm.data
+        llm.data = lambda *a, **k: (gate.wait(5), real(*a, **k))[1]
+        try:
+            media.make(s["id"], "recap")
+            now = progress.making()["making"]
+            self.assertEqual([(x["kind"], x["tab"], x["stage"]) for x in now], [("recap", "listen", "Writing the script")])
+            self.assertEqual(media.listing(s["id"])[0]["progress"]["typical"], progress.TYPICAL["recap"])
+        finally:
+            gate.set()
+            llm.data = real
+        end = time.time() + 5
+        while time.time() < end and progress.making()["making"]:
+            time.sleep(0.02)
+        self.assertIn("recap", [x["kind"] for x in progress.making()["done"]])
+
+    def test_work_a_closed_app_left_is_picked_up_once_then_stopped(self):
+        s = self.made()["list"][0]
+        self.ready(s["id"], "recap")
+        left = "update media set status = 'making', beat = ?, tries = ?, created_at = ? where kind = 'recap'"
+        store.run(left, progress.ago(120), 0, progress.ago(130))
+        media.pick_up()
+        end = time.time() + 5
+        while time.time() < end and media.listing(s["id"])[0]["status"] == "making":
+            time.sleep(0.02)
+        self.assertEqual(media.listing(s["id"])[0]["status"], "ready")
+        store.run(left, progress.ago(120), 1, progress.ago(130))
+        self.assertEqual(media.listing(s["id"])[0]["status"], "failed")
+        self.assertIn("stopped part way", media.listing(s["id"])[0]["error"])
+        aid = classroom.make(kind="exam", name="x", text="word " * 80, read_by="pasted", due=None, minutes=None)
+        end = time.time() + 5
+        while time.time() < end and store.row("select status from assignments where id = ?", aid)["status"] == "making":
+            time.sleep(0.02)
+        store.run("update assignments set status = 'making', beat = ? where id = ?", progress.ago(120), aid)
+        progress.making()
+        self.assertEqual(store.row("select status from assignments where id = ?", aid)["status"], "failed")
+
+    def test_an_older_database_gets_the_new_columns(self):
+        with store.db() as c:
+            c.execute("alter table media drop column stage")
+        store._ready.clear()
+        with store.db() as c:
+            self.assertIn("stage", {r[1] for r in c.execute("pragma table_info(media)")})
 
     def test_a_film_is_one_safe_page_whose_scenes_fill_its_length(self):
         s = self.made()["list"][0]

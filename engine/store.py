@@ -74,6 +74,13 @@ create table if not exists saved (key text primary key, value text not null, cre
 create table if not exists prefs (key text primary key, value text not null);
 """
 
+# Columns added since the first version; each is added once to an older database.
+ADDED = [
+    ("media", "stage text"), ("media", "tries integer not null default 0"), ("media", "beat text"), ("media", "done_at text"), ("media", "note text"),
+    ("assignments", "beat text"), ("assignments", "stage text"), ("assignments", "done_at text"),
+    ("courses", "done_at text"), ("sections", "draft_at text"),
+]
+
 _ready: set[str] = set()
 _lock = threading.Lock()
 
@@ -110,6 +117,12 @@ def db():
         if where not in _ready:
             with _lock:
                 c.executescript(SCHEMA)
+                for table, col in ADDED:
+                    if col.split()[0] not in {r[1] for r in c.execute(f"pragma table_info({table})")}:
+                        try:
+                            c.execute(f"alter table {table} add column {col}")
+                        except sqlite3.OperationalError:  # another process added it first
+                            pass
                 _ready.add(where)
         yield c
         c.commit()

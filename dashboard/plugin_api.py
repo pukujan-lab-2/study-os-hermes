@@ -19,11 +19,11 @@ def _engine():
         mod = importlib.util.module_from_spec(spec)
         sys.modules[NAME] = mod
         spec.loader.exec_module(mod)
-    return {n: importlib.import_module(f"{NAME}.{n}") for n in ("courses", "ingest", "llm", "quiz", "services", "store", "prompts", "media", "tutor", "voice", "essay", "classroom", "label")}
+    return {n: importlib.import_module(f"{NAME}.{n}") for n in ("courses", "ingest", "llm", "quiz", "services", "store", "prompts", "media", "tutor", "voice", "essay", "classroom", "label", "progress")}
 
 
 _m = _engine()
-courses, ingest, llm, quiz, services, store, prompts, media, tutor, voice, essay, classroom, label = _m.values()
+courses, ingest, llm, quiz, services, store, prompts, media, tutor, voice, essay, classroom, label, works = _m.values()
 router = APIRouter()
 
 
@@ -90,6 +90,12 @@ async def home():
         }
 
     return await call(work)
+
+
+@router.get("/making")
+async def making():
+    """Everything being made right now, and what just finished."""
+    return await call(works.making)
 
 
 @router.post("/courses")

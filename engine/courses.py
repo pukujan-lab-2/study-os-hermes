@@ -10,7 +10,7 @@ import re
 import threading
 from datetime import datetime, timedelta, timezone
 
-from . import llm, prompts, store
+from . import llm, progress, prompts, store
 from .mastery import is_mastered, shown, started
 from .store import db, loads, new_id, now, row, rows, run
 
@@ -134,9 +134,9 @@ def _build(course_id: str) -> None:
         _write_all(course_id)
         left = row("select count(*) n from sections where course_id = ? and status = 'failed'", course_id)["n"]
         ready = row("select count(*) n from sections where course_id = ? and status = 'ready'", course_id)["n"]
-        run("update courses set status = ?, error = ? where id = ?", "ready" if ready else "failed", f"{left} of {left + ready} sections couldn't be written." if left else None, course_id)
+        run("update courses set status = ?, done_at = ?, error = ? where id = ?", "ready" if ready else "failed", now(), f"{left} of {left + ready} sections couldn't be written." if left else None, course_id)
     except Exception as err:  # noqa: BLE001 - shown on the course
-        run("update courses set status = 'failed', error = ? where id = ?", str(err)[:300], course_id)
+        run("update courses set status = 'failed', done_at = ?, error = ? where id = ?", now(), str(err)[:300], course_id)
     finally:
         done.set()
         run("update courses set owner = null where id = ? and owner = ?", course_id, OWNER)
@@ -303,7 +303,7 @@ def preview(section_id: str, how: dict) -> None:
     if not s or not s["body"]:
         raise Problem("That section isn't written yet.")
     h = clean_how(how, how_of(s))
-    if not run("update sections set draft_status = 'writing', draft_error = null where id = ? and coalesce(draft_status, '') != 'writing'", section_id):
+    if not run("update sections set draft_status = 'writing', draft_error = null, draft_at = ? where id = ? and coalesce(draft_status, '') != 'writing'", now(), section_id):
         return
 
     def work():
@@ -369,6 +369,7 @@ def get(course_id: str) -> dict:
     if c["status"] in ("planning", "writing"):
         start(course_id)
     out = summary(c)
+    out["progress"] = progress.course(c) if c["status"] in ("planning", "writing") else None
     goals: dict[str, list] = {}
     for o in rows("select * from objectives where course_id = ?", course_id):
         goals.setdefault(o["section_id"], []).append({"id": o["id"], "label": o["label"], "mastery": shown(o["alpha"], o["beta"]), "started": started(o["alpha"], o["beta"]), "mastered": is_mastered(o["alpha"], o["beta"]), "next_review": o["next_review"]})
@@ -395,7 +396,7 @@ def wordings(section_id: str) -> dict:
     vs = rows("select * from versions where section_id = ? order by created_at desc", section_id)
     d = next((v for v in vs if v["status"] == "draft"), None)
     return {
-        "writing": s["draft_status"] == "writing", "error": s["draft_error"],
+        "writing": s["draft_status"] == "writing", "error": s["draft_error"], "progress": {"seconds": round(progress.seconds(s["draft_at"]), 1), "typical": progress.TYPICAL["wording"], "stage": "Writing it the new way", "share": 0} if s["draft_status"] == "writing" else None,
         "draft": {"body": d["body"], "how": loads(d["how"], {})} if d else None,
         "earlier": [{"id": v["id"], "how": loads(v["how"], {}), "until": v["created_at"]} for v in vs if v["status"] == "earlier"],
     }

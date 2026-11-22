@@ -11,12 +11,13 @@ import shutil
 import subprocess
 from pathlib import Path
 
-from . import film, llm, play, prompts, voice
+from . import film, llm, play, progress, prompts, voice
 from .place import here
 from .courses import Problem, _changed, background
 from .store import db, loads, new_id, now, row, rows, run
 
 AUDIO = ("podcast", "recap")
+FIRST = {"podcast": "Writing the script", "recap": "Writing the script", "explainer": "Choosing scenes", "short": "Choosing scenes", "slides": "Choosing slides", "play": "Building the game"}
 VIDEO = ("explainer", "short", "slides")
 HYPERFRAMES = "hyperframes@0.9.80"
 
@@ -61,9 +62,10 @@ def _stamp(body: str) -> str:
 
 def listing(section_id: str) -> list[dict]:
     s = _section(section_id)
+    pick_up()
     out = []
     for m in rows("select * from media where section_id = ?", section_id):
-        out.append({"kind": m["kind"], "status": m["status"], "error": m["error"], "data": _shown(m) if m["status"] == "ready" else None, "stale": m["made_from"] != _stamp(s["body"]), "export": {"status": m["export_status"], "error": m["export_error"], "file": m["export_file"]}})
+        out.append({"kind": m["kind"], "status": m["status"], "error": m["error"], "data": _shown(m) if m["status"] == "ready" else None, "stale": m["made_from"] != _stamp(s["body"]), "progress": progress.of_media(m) if m["status"] == "making" else None, "export": {"status": m["export_status"], "error": m["export_error"], "file": m["export_file"]}})
     return out
 
 
@@ -79,22 +81,56 @@ def make(section_id: str, kind: str) -> None:
         raise Problem("Unknown kind.")
     s = _section(section_id)
     with db() as c:
-        if c.execute("select 1 from media where section_id = ? and kind = ? and status = 'making' and created_at > datetime('now', '-6 minutes')", (section_id, kind)).fetchone():
+        if c.execute("select 1 from media where section_id = ? and kind = ? and status = 'making' and beat > ?", (section_id, kind, progress.ago(progress.STALE))).fetchone():
             return
         c.execute(
-            "insert into media (id, section_id, kind, status, made_from, created_at) values (?,?,?,'making',?,datetime('now')) on conflict(section_id, kind) do update set status = 'making', error = null, made_from = excluded.made_from, created_at = excluded.created_at, export_status = null, export_error = null, export_file = null",
-            (new_id(), section_id, kind, _stamp(s["body"])),
+            "insert into media (id, section_id, kind, status, made_from, created_at, beat, stage) values (?,?,?,'making',?,?,?,?) on conflict(section_id, kind) do update set status = 'making', error = null, made_from = excluded.made_from, created_at = excluded.created_at, beat = excluded.beat, stage = excluded.stage, tries = 0, done_at = null, note = null, export_status = null, export_error = null, export_file = null",
+            (new_id(), section_id, kind, _stamp(s["body"]), now(), now(), FIRST[kind] + "|0"),
         )
+    _start(section_id, kind)
+
+
+def _start(section_id: str, kind: str) -> None:
+    m, s = row("select * from media where section_id = ? and kind = ?", section_id, kind), _section(section_id)
+
+    def step(text: str, share: float = 0.0) -> None:
+        progress.stage("media", m["id"], text, share)
 
     def work():
-        try:
-            data = _audio(s, kind) if kind in AUDIO else _film(s, kind) if kind in VIDEO else play.make(s, [o["label"] for o in rows("select label from objectives where section_id = ?", section_id)])
-            run("update media set status = 'ready', data = ? where section_id = ? and kind = ?", json.dumps(data), section_id, kind)
-        except Exception as err:  # noqa: BLE001
-            run("update media set status = 'failed', error = ? where section_id = ? and kind = ?", str(err)[:300], section_id, kind)
+        with progress.alive("media", m["id"]):
+            try:
+                if m["note"] and kind == "play":  # a game that stopped on the learner's screen
+                    d = loads(m["data"], {})
+                    data = {**d, "js": play.fix(d["js"], m["note"]), "fixed": True}
+                elif kind in AUDIO:
+                    data = _audio(s, kind, step)
+                elif kind in VIDEO:
+                    data = _film(s, kind, step)
+                else:
+                    data = play.make(s, [o["label"] for o in rows("select label from objectives where section_id = ?", section_id)])
+                run("update media set status = 'ready', data = ?, done_at = ?, note = null where id = ?", json.dumps(data), now(), m["id"])
+            except Exception as err:  # noqa: BLE001
+                run("update media set status = 'failed', error = ?, done_at = ? where id = ?", str(err)[:300], now(), m["id"])
         _changed(s["course_id"])
 
     background(work)
+
+
+def pick_up() -> None:
+    """Work a closed app left behind: started again once, then marked as stopped."""
+    for m in rows("select * from media where status = 'making' and (beat is null or beat < ?)", progress.ago(progress.STALE)):
+        old = m["beat"]
+        mine = run("update media set beat = ?, tries = tries + 1 where id = ? and status = 'making' and beat is ?", now(), m["id"], old)
+        if not mine:
+            continue  # another window has it
+        if (m["tries"] or 0) < 1 and progress.seconds(m["created_at"]) < progress.LIMIT:
+            progress.stage("media", m["id"], "Starting again", 0)
+            try:
+                _start(m["section_id"], m["kind"])
+                continue
+            except Problem:
+                pass
+        run("update media set status = 'failed', done_at = ?, error = 'It stopped part way. Try again.' where id = ?", now(), m["id"])
 
 
 def fix_game(section_id: str, error: str) -> None:
@@ -103,31 +139,45 @@ def fix_game(section_id: str, error: str) -> None:
     d = loads(m["data"], {}) if m else {}
     if not d or d.get("fixed"):
         return
-    run("update media set status = 'making', created_at = datetime('now') where id = ?", m["id"])
-    course = _section(section_id)["course_id"]
-
-    def work():
-        try:
-            run("update media set status = 'ready', data = ? where id = ?", json.dumps({**d, "js": play.fix(d["js"], error), "fixed": True}), m["id"])
-        except Exception as err:  # noqa: BLE001
-            run("update media set status = 'failed', error = ? where id = ?", str(err)[:300], m["id"])
-        _changed(course)
-
-    background(work)
+    run("update media set status = 'making', created_at = ?, beat = ?, stage = 'Mending the game|0', tries = 0, done_at = null, note = ? where id = ?", now(), now(), error[:300] or "It stopped.", m["id"])
+    _start(section_id, "play")
 
 
 def _lesson(s: dict) -> str:
     return f"{prompts.learner({'level': s['level'], 'story': 'plain', 'compare_to': ''})}\n\n<lesson course=\"{s['course']}\" title=\"{s['title']}\">\n{s['body']}\n</lesson>"
 
 
-def _audio(s: dict, kind: str) -> dict:
-    out = llm.data(PODCAST if kind == "podcast" else RECAP, _lesson(s), TALK_SCHEMA, purpose=kind)
-    turns = [{"who": "b" if t.get("who") == "b" and kind == "podcast" else "a", "text": re.sub(r"\s+", " ", str(t.get("text", ""))).strip()[:700]} for t in out["turns"] if str(t.get("text", "")).strip()][:20]
-    if len(turns) < 2:
-        raise Problem("It came back too short. Try again.")
-    if turns:
-        voice.say(turns[0]["text"], turns[0]["who"])  # the first line is ready when they press play
-    return {"title": out["title"][:120], "turns": turns}
+def split_turns(turns: list[dict], least: int) -> list[dict]:
+    """Long turns become short ones, sentence by sentence, when there are too few to listen to."""
+    if len(turns) >= least:
+        return turns
+    out = []
+    for t in turns:
+        ss = [x for x in re.split(r"(?<=[.!?])\s+(?=[A-Z\"\u201c])", t["text"]) if x.strip()]
+        for k in range(0, len(ss), 2 if len(ss) > 2 * least else 1):
+            out.append({"who": t["who"], "text": " ".join(ss[k : k + (2 if len(ss) > 2 * least else 1)])})
+    return out
+
+
+def _audio(s: dict, kind: str, step=lambda *a: None) -> dict:
+    least, words, ask = (6, 90, "12 to 16 turns") if kind == "podcast" else (4, 35, "5 to 7 turns")
+    best: list[dict] = []
+    title, note = s["title"], ""
+    for attempt in range(2):
+        out = llm.data(PODCAST if kind == "podcast" else RECAP, _lesson(s) + note, TALK_SCHEMA, purpose=kind)
+        turns = [{"who": "b" if t.get("who") == "b" and kind == "podcast" else "a", "text": re.sub(r"\s+", " ", str(t.get("text", ""))).strip()[:1600]} for t in out.get("turns") or [] if isinstance(t, dict) and str(t.get("text", "")).strip()]
+        turns = [{**t, "text": t["text"][:700]} for t in split_turns(turns, least)][:20]
+        if sum(len(t["text"].split()) for t in turns) > sum(len(t["text"].split()) for t in best):
+            best, title = turns, str(out.get("title") or s["title"])
+        if len(best) >= least and sum(len(t["text"].split()) for t in best) >= words:
+            break
+        step("Writing it again, fuller", 0.3)
+        note = f"\n\nYour last reply was too short. Write all {ask}, each its own item in the list, and cover the whole lesson."
+    if len(best) < 2 or sum(len(t["text"].split()) for t in best) < 6:
+        raise Problem("The model wrote too little. Give it another go.")
+    step("Recording the first line", 0.85)
+    voice.say(best[0]["text"], best[0]["who"])  # the first line is ready when they press play
+    return {"title": title[:120], "turns": best}
 
 
 def clean_scenes(raw: list, kind: str) -> list[dict]:
@@ -145,18 +195,28 @@ def clean_scenes(raw: list, kind: str) -> list[dict]:
     return out
 
 
-def _film(s: dict, kind: str) -> dict:
-    out = llm.data(f"Turn one lesson section into {FILM[kind]}\n{FILM_RULES}", _lesson(s), FILM_SCHEMA, purpose=f"video-{kind}")
-    scenes = clean_scenes(out["scenes"], kind)
+def _film(s: dict, kind: str, step=lambda *a: None) -> dict:
+    scenes, title, note = [], s["title"], ""
+    for attempt in range(2):
+        out = llm.data(f"Turn one lesson section into {FILM[kind]}\n{FILM_RULES}", _lesson(s) + note, FILM_SCHEMA, purpose=f"video-{kind}")
+        got = clean_scenes(out.get("scenes") or [], kind)
+        if len(got) > len(scenes):
+            scenes, title = got, str(out.get("title") or s["title"])
+        if len(scenes) >= (4 if kind == "short" else 5):
+            break
+        step("Choosing more scenes", 0.3)
+        note = "\n\nYour last reply had too few scenes. Write every scene asked for, each with a heading and what is said."
     if len(scenes) < 3:
-        raise Problem("The storyboard came back too short. Try again.")
+        raise Problem("The model wrote too few scenes. Give it another go.")
     for i, x in enumerate(scenes):
+        step(f"Recording scene {i + 1} of {len(scenes)}", 0.55 + 0.4 * i / len(scenes))
         x["kicker"] = s["course"] if x["kind"] == "title" and i == 0 else ""
         wav = voice.say(x["say"], "a")
         x["spoken"] = round(voice.seconds_of(wav), 2) if wav else round(len(x["say"].split()) / 2.5, 2)
         x["has_sound"] = bool(wav)
         x["duration"] = round(max(3.0, x["spoken"] + 0.75), 2)
-    return {"title": out["title"][:120] or s["title"], "format": kind, "seed": s["course_id"], "scenes": scenes}
+    step("Drawing it", 0.97)
+    return {"title": title[:120] or s["title"], "format": kind, "seed": s["course_id"], "scenes": scenes}
 
 
 def film_html(section_id: str, kind: str) -> dict:

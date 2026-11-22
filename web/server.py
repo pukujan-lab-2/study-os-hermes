@@ -4,9 +4,11 @@ in the class's database, under an identity the server gives them. Spaces are del
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import importlib
 import io
+import json
 import os
 import re
 import secrets
@@ -21,7 +23,7 @@ from urllib.parse import urlsplit
 
 import anyio.to_thread
 from fastapi import FastAPI, Request
-from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, Response
+from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -379,7 +381,8 @@ class Slide(BaseModel):
 
 
 class Heard(BaseModel):
-    text: str = Field(min_length=1, max_length=600)
+    text: str = Field("", max_length=600)
+    only_words: bool = False
     slide: int = 1
     speaking: bool = False
     slides: list[Slide] = Field([], max_length=24)
@@ -395,29 +398,59 @@ def host_options(path: str):
     return Response(status_code=204, headers={**CORS, "access-control-allow-methods": "POST, GET, OPTIONS"})
 
 
-@app.post("/api/presenter/hear")
-def host_hear(body: Heard, request: Request):
-    if not host_spend(request, "ask"):
-        return JSONResponse({"detail": "The host has talked enough today."}, 429, headers=CORS)
+def host_voice(text: str) -> bytes | None:
+    f = DATA / "voice" / f"host-{presenter.key(text)}.wav"
+    if not f.exists():
+        try:
+            f.write_bytes(E["services"].modal_tts(text, os.environ.get("PRESENTER_VOICE", "am_michael")))
+        except Exception:  # noqa: BLE001 - asleep: the page uses the browser's voice
+            return None
+    return f.read_bytes()
+
+
+@app.post("/api/presenter/turn")
+async def host_turn(request: Request):
+    """One spoken sentence: what was heard, what it decided, what it says, each sent the moment it is known."""
+    raw = await request.body()
+    if len(raw) > 1_400_000 or len(raw) < 8:
+        return JSONResponse({"detail": "too big"}, 413, headers=CORS)
+    n = int.from_bytes(raw[:4], "big")
     try:
-        return JSONResponse(presenter.ask(fast, body.model_dump()), headers=CORS)
-    except Exception as err:  # noqa: BLE001 - the talk goes on without it
-        print("presenter:", type(err).__name__, str(err)[:160], flush=True)
-        return JSONResponse({"detail": "The host didn't catch that."}, 503, headers=CORS)
+        body = Heard.model_validate_json(raw[4 : 4 + n]).model_dump()
+    except ValueError:
+        return JSONResponse({"detail": "bad"}, 400, headers=CORS)
+    wav = raw[4 + n :]
+    if not await anyio.to_thread.run_sync(host_spend, request, "hear"):
+        return JSONResponse({"detail": "The host has talked enough today."}, 429, headers=CORS)
+
+    def go():
+        line = lambda d: (json.dumps(d) + "\n").encode()  # noqa: E731
+        try:
+            if wav[:4] == b"RIFF":
+                body["text"] = E["services"].modal_stt(wav)
+                yield line({"heard": body["text"]})
+            if not body["text"].strip() or body.get("only_words"):
+                return
+            if not host_spend(request, "ask"):
+                return
+            for d in presenter.stream(fast, body):
+                yield line(d)
+                if d.get("say"):
+                    a = host_voice(d["say"])
+                    yield line({"audio": base64.b64encode(a).decode() if a else None})
+        except Exception as err:  # noqa: BLE001 - the talk goes on without it
+            print("turn:", type(err).__name__, str(err)[:160], flush=True)
+            yield line({"error": "asleep" if "Service" in type(err).__name__ else "lost"})
+
+    return StreamingResponse(go(), media_type="application/x-ndjson", headers={**CORS, "x-accel-buffering": "no"})
 
 
 @app.post("/api/presenter/say")
 def host_say(body: Line, request: Request):
-    f = DATA / "voice" / f"host-{presenter.key(body.text)}.wav"
-    if not f.exists():
-        if not host_spend(request, "say"):
-            return JSONResponse({"detail": "no voice"}, 429, headers=CORS)
-        try:
-            wav = E["services"].modal_tts(body.text, os.environ.get("PRESENTER_VOICE", "am_michael"))
-        except Exception:  # noqa: BLE001 - asleep: the page uses the browser's voice
-            return JSONResponse({"detail": "no voice"}, 503, headers=CORS)
-        f.write_bytes(wav)
-    return Response(f.read_bytes(), media_type="audio/wav", headers=CORS)
+    if not (DATA / "voice" / f"host-{presenter.key(body.text)}.wav").exists() and not host_spend(request, "say"):
+        return JSONResponse({"detail": "no voice"}, 429, headers=CORS)
+    a = host_voice(body.text)
+    return Response(a, media_type="audio/wav", headers=CORS) if a else JSONResponse({"detail": "no voice"}, 503, headers=CORS)
 
 
 @app.post("/api/presenter/listen")
