@@ -7,6 +7,7 @@ description: Set up Study OS for someone in Hermes - turn on its pages, add opti
 
 Work through these with the person, one at a time. Skip anything they don't want. Everything works without keys.
 
+0. **Installed and on?** If not: `hermes plugins install pukujan-lab-2/study-os-hermes`, then `hermes plugins enable study-os-solo` (it asks to add pypdf, which reads PDFs here), then `hermes gateway restart`.
 1. **Pages.** In Hermes Desktop: Capabilities, Plugins, Rescan, then turn on Study OS Solo. Two entries appear in the sidebar: **Study OS** (learn) and **Study OS Teacher**.
 2. **Model.** It uses whatever model Hermes is set to. If calls fail, run `hermes model`.
 3. **Keys (optional).** They paste these themselves under Settings, Plugins, Study OS Solo. Never ask for a key in chat, and never print one.
