@@ -576,6 +576,34 @@ function Watch({ ctx, section }) {
       : data && h(Making, { m, what: kind === 'slides' ? 'the slides' : `the ${label.toLowerCase()}`, onMake: make }))
 }
 
+/* ---- play: the idea as a toy ------------------------------------------------------------------------------------------ */
+
+function Play({ ctx, section }) {
+  const { data, refetch } = useMedia(ctx, section.id)
+  const [error, setError] = useState(null)
+  const [level, setLevel] = useState(0)
+  const frame = useRef(null)
+  const box = useRef(null)
+  const m = data && data.media.find(x => x.kind === 'play')
+  const make = async () => { setError(null); setLevel(0); try { await ctx.rest(`/sections/${section.id}/media`, { method: 'POST', body: { kind: 'play' } }); refetch() } catch (err) { setError(msg(err)) } }
+  useEffect(() => {
+    const on = e => {
+      if (!frame.current || e.source !== frame.current.contentWindow || !e.data || !e.data.game) return
+      if (e.data.game === 'level') { setLevel(Math.min(3, Number(e.data.level) || 0)); haptic('success') }
+      if (e.data.game === 'won') setLevel(3)
+      if (e.data.game === 'error') ctx.rest(`/sections/${section.id}/play/fix`, { method: 'POST', body: { text: String(e.data.text).slice(0, 300) } }).then(() => refetch()).catch(() => {})
+    }
+    window.addEventListener('message', on)
+    return () => window.removeEventListener('message', on)
+  }, [section.id])
+  return h('section.so-card.so-in',
+    h('div.so-row', h('h2.so-grow', m && m.status === 'ready' ? m.data.title : 'Play'), m && m.status === 'ready' && [h('span.so-levels', { key: 1, 'aria-label': `${level} of 3 levels` }, [1, 2, 3].map(n => h('i', { key: n, className: cls(n <= level && 'on') }, n <= level ? h(Icon, { n: 'check', size: 14 }) : n))), h(IconBtn, { key: 2, icon: 'full', label: 'Full screen', onClick: () => box.current.requestFullscreen && box.current.requestFullscreen() }), h(IconBtn, { key: 3, icon: 'redo', label: 'Make another game', onClick: make })]),
+    error && h(Note, { bad: true }, error),
+    m && m.status === 'ready'
+      ? [m.stale && h(Note, { key: 'n' }, 'Made from the older wording.'), h('div.so-game', { key: 'g', ref: box }, h(SandboxedFrame, { key: `${m.data.title}${m.data.html.length}`, ref: frame, title: m.data.title, src: `data:text/html;charset=utf-8,${encodeURIComponent(m.data.html)}`, style: { width: '100%', height: '100%', border: 0, display: 'block' } }))]
+      : data && (m && m.status === 'making' ? h('div.so-row.so-wait', h(Icon, { n: 'spin' }), h('span', 'Building a game from this section. About a minute or two; you can leave.')) : h('div.so-makebox', h(Icon, { n: 'play', size: 44 }), h('p.so-dim', 'A little game where you work the idea with your hands.'), m && m.error && h(Note, { bad: true }, m.error), h(Btn, { kind: 'main', onClick: make }, 'Make the game'))))
+}
+
 /* ---- talk: speak, be heard, interrupt ---------------------------------------------------------------------------------- */
 
 function wavOf(chunks, from) {
@@ -752,7 +780,7 @@ const dueIn = s => {
 }
 const inputDate = d => new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16)
 /** A text with Pangram's reading of each part painted on it. */
-const Painted = ({ v }) => v && v.parts && v.parts.length ? h('p.so-painted', v.parts.map((p, i) => h('span', { key: i, className: p.kind, title: `Reads as ${p.kind === 'ai' ? 'AI-written' : p.kind === 'assisted' ? 'AI-assisted' : 'human-written'}${p.sure ? `, ${p.sure.toLowerCase()} confidence` : ''}${p.humanized ? ', may be run through a humanizer' : ''}` }, p.text))) : null
+const Painted = ({ v }) => v && v.parts && v.parts.length ? h('p.so-painted', v.parts.map((p, i) => h('span', { key: i, style: { '--i': i }, className: p.kind, title: `Reads as ${p.kind === 'ai' ? 'AI-written' : p.kind === 'assisted' ? 'AI-assisted' : 'human-written'}${p.sure ? `, ${p.sure.toLowerCase()} confidence` : ''}${p.humanized ? ', may be run through a humanizer' : ''}` }, p.text))) : null
 const Mix = ({ v, small }) => h('div', { className: cls('so-mix', small && 'small'), role: 'img', 'aria-label': `${pct(v.human)}% human, ${pct(v.assisted)}% assisted, ${pct(v.ai)}% AI` }, h('i.hu', { style: { flex: v.human } }), h('i.as', { style: { flex: v.assisted } }), h('i.ai', { style: { flex: v.ai } }))
 /** Two weeks of deadlines and meetings. */
 function Weeks({ items }) {
@@ -914,7 +942,10 @@ function NewWork({ ctx, onDone }) {
 /** Who wrote the source, by Pangram. undefined: still looking. */
 function SourceCheck({ v }) {
   const [open, setOpen] = useState(false)
+  const [seen, setSeen] = useState(false)
+  useEffect(() => { setSeen(false); if (!v) return; const t = setTimeout(() => setSeen(true), reduced() ? 0 : 900); return () => clearTimeout(t) }, [v])
   if (v === null) return null
+  if (v !== undefined && !seen) return h('div.so-source2.scan', h(Icon, { n: 'spin', size: 18 }), h('div.so-grow', h('b', 'Reading it part by part'), h('div.so-scanbar', h('i'))))
   if (v === undefined) return h('div.so-source2', h(Icon, { n: 'spin', size: 18 }), h('span', 'Pangram is checking who wrote it'))
   const slop = v.ai > 0.5
   return h('div', h('button.so-source2', { type: 'button', className: cls('so-source2', slop ? 'bad' : 'good'), 'aria-expanded': open, onClick: () => setOpen(!open) }, h(Icon, { n: slop ? 'x' : 'check', size: 20 }), h('div.so-grow', h('b', slop ? 'This source reads as AI-written' : v.ai > 0.1 ? 'Mostly written by people' : 'Written by people'), h(Mix, { v })), h('span', `${pct(v.human)}% human`, v.saved && h('span.so-dim', ' · saved'))), open && h(Painted, { v }))
@@ -1070,8 +1101,8 @@ function Course({ ctx, id, home, go }) {
           h('span.so-grow', x.title, h(Bar, { value: known })))
       })),
       s && h('div.so-main', { key: s.id },
-        s.body && !quiz && h('div.so-tabs', { role: 'tablist' }, [['learn', 'Learn', 'book'], ['watch', 'Watch', 'play'], ['listen', 'Listen', 'sound'], ['talk', 'Talk', 'mic']].map(([k, t, i]) => h('button', { key: k, type: 'button', role: 'tab', 'aria-selected': tab === k, onClick: () => { setTab(k); setReword(false) } }, h(Icon, { n: i, size: 16 }), t))),
-        s.body && !quiz && tab === 'watch' ? h(Watch, { key: `w${s.id}`, ctx, section: s }) : s.body && !quiz && tab === 'listen' ? h(Listen, { key: `l${s.id}`, ctx, section: s }) : s.body && !quiz && tab === 'talk' ? h(Talk, { key: `t${s.id}`, ctx, section: s, onChange: changed }) : quiz ? h(Quiz, { ctx, scope: { course_id: id, section_id: s.id }, title: s.title, onClose: () => { setQuiz(false); changed() }, onChange: changed })
+        s.body && !quiz && h('div.so-tabs', { role: 'tablist' }, [['learn', 'Learn', 'book'], ['watch', 'Watch', 'play'], ['listen', 'Listen', 'sound'], ['play', 'Play', 'bolt'], ['talk', 'Talk', 'mic']].map(([k, t, i]) => h('button', { key: k, type: 'button', role: 'tab', 'aria-selected': tab === k, onClick: () => { setTab(k); setReword(false) } }, h(Icon, { n: i, size: 16 }), t))),
+        s.body && !quiz && tab === 'watch' ? h(Watch, { key: `w${s.id}`, ctx, section: s }) : s.body && !quiz && tab === 'listen' ? h(Listen, { key: `l${s.id}`, ctx, section: s }) : s.body && !quiz && tab === 'play' ? h(Play, { key: `p${s.id}`, ctx, section: s }) : s.body && !quiz && tab === 'talk' ? h(Talk, { key: `t${s.id}`, ctx, section: s, onChange: changed }) : quiz ? h(Quiz, { ctx, scope: { course_id: id, section_id: s.id }, title: s.title, onClose: () => { setQuiz(false); changed() }, onChange: changed })
           : h('div.so-in',
             h('article.so-card.so-lesson',
               h('div.so-eyebrow', `Section ${at + 1} of ${c.list.length}`),
@@ -1169,12 +1200,29 @@ function Home({ home, go }) {
     h('header.so-hero.so-in',
       h('div.so-grow', h('div.so-eyebrow', hi < 12 ? 'Good morning' : hi < 18 ? 'Good afternoon' : 'Good evening'), h('h1', cs.length ? ['Pick up ', h('em', { key: 1 }, 'where you left off')] : ['What do you want to ', h('em', { key: 1 }, 'learn?')])),
       h('div.so-streak', { 'aria-label': `${home.streak.days} day streak` }, h('div.so-row', h('span.so-flame', h(Icon, { n: 'flame', size: 26 })), h('b', home.streak.days), h('span.so-dim', home.streak.days === 1 ? 'day' : 'days')), h('div.so-week', home.streak.week.map((d, i) => h('span', { key: i, className: cls(d.done && 'on'), title: d.day }, d.day[0]))))),
-    !cs.length && h('div.so-card.so-empty.so-in', h(Icon, { n: 'book', size: 44 }), h('h2', 'Make your first course'), h('p.so-dim', 'Give it a topic, a PDF or your notes. It writes short lessons, quizzes you, and brings things back before you forget them. All on this computer, with no account.'), h(Btn, { kind: 'main', icon: 'plus', onClick: () => go('new') }, 'Make a course')),
+    !cs.length && h('div.so-card.so-empty.so-in', h(Icon, { n: 'book', size: 44 }), h('h2', 'Make your first course'), h('p.so-dim', 'Give it a topic, a PDF or your notes. It writes short lessons, quizzes you, and brings things back before you forget them. All on this computer, with no account.'), h('div.so-row', h(Btn, { kind: 'main', icon: 'plus', onClick: () => go('new') }, 'Make a course'), h(Btn, { icon: 'sliders', onClick: () => go('setup') }, 'Set up'))),
     cs.length > 0 && h('div.so-grid2.so-in',
       h('button.so-card.so-resume', { type: 'button', onClick: () => go('course', last.id) }, h(Cover, { course: last }), h('div.so-grow', h('div.so-eyebrow', last.status === 'ready' ? 'Keep going' : last.status === 'failed' ? 'Needs another try' : 'Being written'), h('h2', last.title), h('p.so-dim', last.status === 'ready' ? `${last.read} of ${last.sections} sections read` : last.status === 'failed' ? last.error : `${last.written} of ${last.sections || '…'} sections ready`), h(Bar, { value: last.mastery })), h(Ring, { value: last.mastery, size: 72 }, h('b', `${pct(last.mastery)}%`))),
       h('button', { type: 'button', className: cls('so-card so-due', home.due && 'hot'), disabled: !home.due, onClick: () => go('review') }, h(Icon, { n: 'redo', size: 26 }), h('div', h('b.so-count', home.due), h('div', home.due === 1 ? 'goal to review' : 'goals to review')), h('span.so-dim', home.due ? 'A few minutes keeps it fresh' : 'Nothing due right now'))),
     cs.length > 0 && h('div.so-row.so-sec', h('h2.so-grow', 'Your courses'), h(Btn, { kind: 'main', icon: 'plus', onClick: () => go('new') }, 'New course')),
     h('div.so-shelf', cs.map((c, i) => h('button.so-book.so-in', { key: c.id, type: 'button', style: { '--i': i }, onClick: () => go('course', c.id) }, h(Cover, { course: c }), h('div', h('b', c.title), h('span.so-dim', c.status === 'ready' ? `${c.mastered} of ${c.goals} known` : c.status === 'failed' ? 'Needs another try' : `Writing ${c.written}/${c.sections || '…'}`), c.due > 0 && h('span.so-tag', `${c.due} due`))))))
+}
+
+/* ---- set up: your own keys, or only this computer ------------------------------------------------------------------------ */
+
+function Setup({ ctx, home, go }) {
+  const s = home.services
+  const open = () => host.navigate(`/settings?tab=plugins&agent=${ID}`)
+  const rows = [
+    ['reducto', 'Reducto', 'Reads PDFs, scans and handwriting', 'PDFs with text are read here', 'file'],
+    ['pangram', 'Pangram', 'Says who wrote it, part by part', 'The check stays off', 'check'],
+    ['modal', 'Modal', 'A natural voice that hears you', 'Your computer’s own voice', 'mic']
+  ]
+  return h('div.so-page',
+    h('header.so-in', h('div.so-eyebrow', 'Takes a minute'), h('h1', 'Set ', h('em', 'up')), h('p.so-lead', 'Use only this computer, or add your own keys. You can change it any time.')),
+    h('div.so-setup', h('div.so-card.so-in.here', h(Icon, { n: 'check', size: 34 }), h('h2', 'Just this computer'), h('p', 'Works now. Nothing to add. Lessons come from the model you use in Hermes.'), h(Btn, { kind: 'main', onClick: () => go('new') }, 'Start')),
+      h('div.so-card.so-in', { style: { '--i': 1 } }, h('div.so-row', h('h2.so-grow', 'Add your keys'), h(Btn, { icon: 'sliders', onClick: open }, 'Open settings')), rows.map(([k, n, on, off, i]) => h('div.so-svc', { key: k, className: cls('so-svc', s[k] && 'on') }, h('span.so-dotbig', h(Icon, { n: s[k] ? 'check' : i, size: 18 })), h('div.so-grow', h('b', n), h('span.so-dim', s[k] ? on : `${on}. Without it: ${off.charAt(0).toLowerCase()}${off.slice(1)}.`)), h('span.so-tag', { className: cls('so-tag', s[k] && 'ok') }, s[k] ? 'On' : 'Optional'))))),
+    h('div.so-card.so-in', { style: { '--i': 2 } }, h('div.so-row', h('div.so-grow', h('h2', 'Or let Hermes do it'), h('p.so-dim', 'It walks you through keys, Google and your class folder. You paste keys into Hermes’ settings, never into the chat.')), h(Btn, { icon: 'chat', onClick: async () => { host.newChat && host.newChat(); setTimeout(() => host.composer && host.composer.setDraft('new', 'Set up Study OS for me. Use the study-os-solo:setup skill.'), 700) } }, 'Ask Hermes'))))
 }
 
 function Page({ ctx }) {
@@ -1200,6 +1248,7 @@ function Page({ ctx }) {
   if (error && !home) body = h('div.so-page', h('div.so-card.so-empty', h('h2', 'Study OS isn’t running yet'), h('p.so-dim', 'Turn on its agent half: run “hermes plugins enable study-os-solo”, then restart the gateway.'), h('p.so-dim', msg(error)), h(Btn, { kind: 'main', onClick: () => refetch() }, 'Try again')))
   else if (!home) body = h('div.so-page', h('div.so-skel'), h('div.so-skel'))
   else if (name === 'new') body = h(NewCourse, { ctx, home, go })
+  else if (name === 'setup') body = h(Setup, { ctx, home, go })
   else if (name === 'class') body = h(ClassPage, { ctx })
   else if (name === 'essay') body = h(Essay, { ctx, home })
   else if (name === 'known') body = h(Known, { ctx, go })
@@ -1209,7 +1258,7 @@ function Page({ ctx }) {
   return h('div.so-root', { className: cls('so-root', look) },
     h('div.so-top', h('button.so-logo', { type: 'button', onClick: () => go('home') }, 'Study', h('em', 'os')),
       h('nav', { 'aria-label': 'Study OS' }, [['home', 'Courses'], ['known', 'What you know'], ['essay', 'Essay check'], ['class', 'Class']].map(([k, t]) => h('button', { key: k, type: 'button', 'aria-current': name === k ? 'page' : undefined, onClick: () => go(k) }, t)), home && home.due > 0 && h('button', { type: 'button', 'aria-current': name === 'review' ? 'page' : undefined, onClick: () => go('review') }, 'Review', h('span.so-badge', home.due))),
-      h('span.so-grow'), h(IconBtn, { icon: 'look', label: 'Change the look', onClick: () => { const n = { sticker: 'studio', studio: 'hermes', hermes: 'sticker' }[look] || 'sticker'; setLook(n); if (ctx.storage) ctx.storage.set('look', n) } }), h(Btn, { kind: 'main', icon: 'plus', onClick: () => go('new') }, 'New')),
+      h('span.so-grow'), h(IconBtn, { icon: 'sliders', label: 'Set up', onClick: () => go('setup') }), h(IconBtn, { icon: 'look', label: 'Change the look', onClick: () => { const n = { sticker: 'studio', studio: 'hermes', hermes: 'sticker' }[look] || 'sticker'; setLook(n); if (ctx.storage) ctx.storage.set('look', n) } }), h(Btn, { kind: 'main', icon: 'plus', onClick: () => go('new') }, 'New')),
     h('div.so-body', { key: `${name}:${view.id || ''}` }, body))
 }
 
@@ -1323,7 +1372,7 @@ const LOOKS = `
 .so-signals{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px}.so-big2{display:block;font-size:44px;line-height:1.05;letter-spacing:-.04em;font-weight:780;margin-bottom:8px}.so-big2 span{font-size:16px;letter-spacing:0;font-weight:500;color:var(--so-3)}.so-spark{display:block;width:100%;height:40px}.so-spark path{fill:color-mix(in srgb,var(--so-a) 30%,transparent);stroke:var(--so-a);stroke-width:2;vector-effect:non-scaling-stroke}.so-spark .bad{fill:color-mix(in srgb,var(--so-bad) 25%,transparent);stroke:var(--so-bad)}.so-mid{font-size:clamp(30px,5cqw,48px)!important}.so-pts{width:74px!important;text-align:center;padding:7px!important}.so-ans{white-space:pre-wrap;margin-top:12px!important;line-height:1.7}
 .so-grid{border-collapse:separate;border-spacing:0;width:100%;margin-top:14px}.so-grid th{text-align:left;font-weight:500;padding:9px 14px 9px 0;vertical-align:middle}.so-grid thead b,.so-grid thead .so-dim{display:block;max-width:190px}.so-grid td{padding:6px 14px 6px 0}.so-grid tbody tr>*{border-top:1px solid color-mix(in srgb,var(--so-ink) 12%,transparent)}.so-grid tbody th{display:flex;gap:11px;align-items:center;font-weight:600}.so-face{display:grid;place-items:center;width:34px;height:34px;border-radius:99px;background:#f39ac3;color:#121212;border:1.5px solid var(--so-line);font-weight:700}.so-grid tr:nth-child(2n) .so-face{background:#8f9cff}.so-grid tr:nth-child(3n) .so-face{background:#ffc93c}.so-dot2{display:block;width:16px;height:16px;border-radius:99px;border:1.5px dashed var(--so-3)}.so-dot2.half{border-style:solid;background:linear-gradient(90deg,var(--so-a) 50%,transparent 0)}.so-dot2.late{border:1.5px solid var(--so-bad)}.so-cell{display:inline-flex!important;gap:10px;align-items:center;padding:8px 14px!important;border-radius:12px;border:1.5px solid var(--so-line)!important;background:var(--so-card)!important;font-size:13px;font-weight:600}.so-cell:hover{box-shadow:3px 3px 0 var(--so-line)}.so-cell.back{opacity:.75}.so-qs{margin-top:14px;list-style:decimal}
 @container (max-width:780px){.so-signals{grid-template-columns:1fr}.so-cal{grid-template-columns:repeat(7,minmax(44px,1fr))}.so-day{min-height:58px;padding:5px}.so-day i{font-size:0;height:8px;padding:0}.so-when{width:auto}}
-.so-samples{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:14px}.so-samples .so-label{margin:0 4px 0 0}.so-samples button{display:inline-flex;gap:8px;align-items:center;padding:7px 14px;border-radius:99px;border:1.5px dashed var(--so-line);font-size:13px;font-weight:600;transition:background .2s}.so-samples button:hover:not(:disabled){border-style:solid}.so-samples .ai svg{color:var(--so-bad)}.so-samples .hu svg{color:var(--so-good)}.so-talkgrid{display:grid;grid-template-columns:minmax(0,1.35fr) minmax(0,1fr);gap:18px;align-items:start}.so-talkgrid.solo{grid-template-columns:1fr}@container (max-width:900px){.so-talkgrid{grid-template-columns:1fr}}
+.so-game{width:100%;aspect-ratio:16/10;margin-top:16px;border-radius:20px;overflow:hidden;border:1.5px solid var(--so-line);background:#faf8f3}.so-root.sticker .so-game{box-shadow:5px 5px 0 #121212}.so-game:fullscreen{border-radius:0;border:0}.so-levels{display:flex;gap:6px}.so-levels i{display:grid;place-items:center;width:28px;height:28px;border-radius:99px;border:1.5px solid var(--so-line);font-style:normal;font-size:12px;font-weight:700;transition:background .3s}.so-levels .on{background:var(--so-good);color:#fff}@container (max-width:520px){.so-game{aspect-ratio:9/13}}.so-scanbar{height:12px;border-radius:9px;margin-top:8px;overflow:hidden;background:color-mix(in srgb,var(--so-ink) 10%,transparent)}.so-scanbar i{display:block;height:100%;background:linear-gradient(90deg,var(--so-a),#d7322a);animation:so-scan .9s cubic-bezier(.4,0,.2,1) both}@keyframes so-scan{from{width:0}to{width:100%}}.so-mix i{animation:so-grow .9s var(--so-ease) both;transform-origin:0 50%}@keyframes so-grow{from{transform:scaleX(0)}}.so-painted span{animation:so-paint .5s ease both;animation-delay:calc(var(--i,0)*70ms)}@keyframes so-paint{from{background-color:transparent;box-shadow:none}}.so-setup{display:grid;grid-template-columns:1fr 1.5fr;gap:18px;align-items:start}.so-setup .here{display:flex!important;flex-direction:column;gap:14px;align-items:flex-start}.so-root.sticker .so-setup .here{background:#ffc93c}.so-svc{display:flex;gap:14px;align-items:center;padding:14px 0;border-top:1px solid color-mix(in srgb,var(--so-ink) 14%,transparent)}.so-svc:first-of-type{margin-top:14px}.so-svc b,.so-svc .so-dim{display:block}.so-dotbig{display:grid;place-items:center;width:40px;height:40px;border-radius:99px;border:1.5px solid var(--so-line);flex:none}.so-svc.on .so-dotbig{background:var(--so-good);color:#fff;border-color:transparent}@container (max-width:780px){.so-setup{grid-template-columns:1fr}}.so-samples{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:14px}.so-samples .so-label{margin:0 4px 0 0}.so-samples button{display:inline-flex;gap:8px;align-items:center;padding:7px 14px;border-radius:99px;border:1.5px dashed var(--so-line);font-size:13px;font-weight:600;transition:background .2s}.so-samples button:hover:not(:disabled){border-style:solid}.so-samples .ai svg{color:var(--so-bad)}.so-samples .hu svg{color:var(--so-good)}.so-talkgrid{display:grid;grid-template-columns:minmax(0,1.35fr) minmax(0,1fr);gap:18px;align-items:start}.so-talkgrid.solo{grid-template-columns:1fr}@container (max-width:900px){.so-talkgrid{grid-template-columns:1fr}}
 @media (prefers-reduced-motion:reduce){.so-stroke{stroke-dashoffset:0}.so-tint{opacity:.2}.so-ink{clip-path:none}}
 `
 

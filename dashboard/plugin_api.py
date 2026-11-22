@@ -222,6 +222,12 @@ async def export(section_id: str, body: Make):
     return await call(media.export, section_id, body.kind, body.render)
 
 
+@router.post("/sections/{section_id}/play/fix")
+async def play_fix(section_id: str, body: Text):
+    await call(media.fix_game, section_id, body.text)
+    return {"ok": True}
+
+
 @router.get("/sections/{section_id}/ear-quiz")
 async def ear_quiz(section_id: str):
     return await call(media.ear_quiz, section_id)

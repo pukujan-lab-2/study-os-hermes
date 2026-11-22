@@ -11,7 +11,7 @@ import shutil
 import subprocess
 from pathlib import Path
 
-from . import film, llm, prompts, voice
+from . import film, llm, play, prompts, voice
 from .courses import Problem, _changed, background
 from .store import db, loads, new_id, now, row, rows, run
 
@@ -67,7 +67,7 @@ def listing(section_id: str) -> list[dict]:
 
 
 def make(section_id: str, kind: str) -> None:
-    if kind not in AUDIO + VIDEO:
+    if kind not in (*AUDIO, *VIDEO, "play"):
         raise Problem("Unknown kind.")
     s = _section(section_id)
     with db() as c:
@@ -80,11 +80,30 @@ def make(section_id: str, kind: str) -> None:
 
     def work():
         try:
-            data = _audio(s, kind) if kind in AUDIO else _film(s, kind)
+            data = _audio(s, kind) if kind in AUDIO else _film(s, kind) if kind in VIDEO else play.make(s, [o["label"] for o in rows("select label from objectives where section_id = ?", section_id)])
             run("update media set status = 'ready', data = ? where section_id = ? and kind = ?", json.dumps(data), section_id, kind)
         except Exception as err:  # noqa: BLE001
             run("update media set status = 'failed', error = ? where section_id = ? and kind = ?", str(err)[:300], section_id, kind)
         _changed(s["course_id"])
+
+    background(work)
+
+
+def fix_game(section_id: str, error: str) -> None:
+    """One repair when a game stops with an error on the learner's screen."""
+    m = row("select * from media where section_id = ? and kind = 'play' and status = 'ready'", section_id)
+    d = loads(m["data"], {}) if m else {}
+    if not d or d.get("fixed"):
+        return
+    run("update media set status = 'making', created_at = datetime('now') where id = ?", m["id"])
+    course = _section(section_id)["course_id"]
+
+    def work():
+        try:
+            run("update media set status = 'ready', data = ? where id = ?", json.dumps({**d, "html": play.fix(d["html"], error), "fixed": True}), m["id"])
+        except Exception as err:  # noqa: BLE001
+            run("update media set status = 'failed', error = ? where id = ?", str(err)[:300], m["id"])
+        _changed(course)
 
     background(work)
 

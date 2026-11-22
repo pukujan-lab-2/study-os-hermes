@@ -15,7 +15,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from engine import classroom, courses, essay, film, ingest, llm, mastery, media, quiz, services, store, tutor, voice  # noqa: E402
+from engine import classroom, courses, essay, film, ingest, llm, mastery, media, play, quiz, services, store, tutor, voice  # noqa: E402
 
 QUIZ = {
     "objectives": [
@@ -55,6 +55,9 @@ class FakeModel:
         if self.fail_lesson:
             self.fail_lesson -= 1
             raise RuntimeError("429 rate limit")
+        if "playable game" in messages[0]["content"]:
+            broken = "corrected document" in messages[-1]["content"]
+            return SimpleNamespace(text="Here:\n```html\n<!doctype html><html><head><title>Wick pull</title></head><body><canvas id=c></canvas><script>requestAnimationFrame(function(){" + ("/*fixed*/" if broken else "") + "})</script></body></html>\n```")
         if "whiteboard" in messages[0]["content"]:
             return SimpleNamespace(text="title: Cell\ncircle 100 100 9999 blue fill\narrow 1 1 50 50 red\ntext 5 5 30 ink Cell wall\npath ink M0 0 <script>\npath green fill M 1 1 L 20 20 Z\nblob 1 2")
         self.bodies += 1
@@ -405,6 +408,24 @@ class Media(Case):
         self.assertTrue((d / "voice" / "0.wav").exists())
         self.assertNotIn("REDUCTO_API_KEY", media._env())
 
+    def test_a_game_is_fenced_in_and_repaired_once(self):
+        s = self.made()["list"][0]
+        g = self.ready(s["id"], "play")["data"]
+        self.assertEqual(g["title"], "Wick pull")
+        self.assertTrue(g["html"].startswith("<!doctype html>") and g["html"].endswith("</html>"))
+        self.assertIn("default-src 'none'", g["html"])
+        media.fix_game(s["id"], "x is not defined")
+        end = time.time() + 5
+        while media.listing(s["id"])[0]["status"] != "ready" and time.time() < end:
+            time.sleep(0.02)
+        m = media.listing(s["id"])[0]["data"]
+        self.assertIn("/*fixed*/", m["html"])
+        media.fix_game(s["id"], "again")
+        self.assertEqual(media.listing(s["id"])[0]["status"], "ready")
+        for bad in ("<html><body>no picture</body></html>", "<html><canvas></canvas>requestAnimationFrame"):
+            with self.assertRaises(courses.Problem):
+                play.clean(bad)
+
     def test_the_ear_quiz_reads_the_right_answer(self):
         s = self.made()["list"][0]
         for x in media.ear_quiz(s["id"])["items"]:
@@ -503,7 +524,7 @@ class Tools(Case):
         pkg = types.ModuleType("solo")
         pkg.__path__ = [str(root)]
         sys.modules["solo"] = pkg
-        for n in ("engine", "engine.store", "engine.courses", "engine.quiz", "engine.llm", "engine.ingest", "engine.services", "engine.media", "engine.tutor", "engine.voice", "engine.essay", "engine.film", "engine.classroom"):
+        for n in ("engine", "engine.store", "engine.courses", "engine.quiz", "engine.llm", "engine.ingest", "engine.services", "engine.media", "engine.tutor", "engine.voice", "engine.essay", "engine.film", "engine.classroom", "engine.play"):
             sys.modules[f"solo.{n}"] = sys.modules[n]
         self.tools = importlib.import_module("solo.study_tools")
 
