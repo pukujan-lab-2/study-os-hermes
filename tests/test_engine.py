@@ -56,8 +56,8 @@ class FakeModel:
             self.fail_lesson -= 1
             raise RuntimeError("429 rate limit")
         if "playable game" in messages[0]["content"]:
-            broken = "corrected document" in messages[-1]["content"]
-            return SimpleNamespace(text="Here:\n```html\n<!doctype html><html><head><title>Wick pull</title></head><body><canvas id=c></canvas><script>requestAnimationFrame(function(){" + ("/*fixed*/" if broken else "") + "})</script></body></html>\n```")
+            broken = "corrected JavaScript" in messages[-1]["content"]
+            return SimpleNamespace(text="Here:\n```js\nG.onLevel = n => { G.goal('x') };\nG.run(dt => { G.win('y') }, c => {" + ("/*fixed*/" if broken else "") + "});\n```")
         if "whiteboard" in messages[0]["content"]:
             return SimpleNamespace(text="title: Cell\ncircle 100 100 9999 blue fill\narrow 1 1 50 50 red\ntext 5 5 30 ink Cell wall\npath ink M0 0 <script>\npath green fill M 1 1 L 20 20 Z\nblob 1 2")
         self.bodies += 1
@@ -412,8 +412,8 @@ class Media(Case):
     def test_a_game_is_fenced_in_and_repaired_once(self):
         s = self.made()["list"][0]
         g = self.ready(s["id"], "play")["data"]
-        self.assertEqual(g["title"], "Wick pull")
-        self.assertTrue(g["html"].startswith("<!doctype html>") and g["html"].endswith("</html>"))
+        self.assertEqual(g["title"], s["title"])
+        self.assertTrue(g["html"].startswith("<!doctype html>") and g["html"].endswith("</html>") and "G.confetti" in g["html"])
         self.assertIn("default-src 'none'", g["html"])
         media.fix_game(s["id"], "x is not defined")
         end = time.time() + 5
@@ -423,7 +423,7 @@ class Media(Case):
         self.assertIn("/*fixed*/", m["html"])
         media.fix_game(s["id"], "again")
         self.assertEqual(media.listing(s["id"])[0]["status"], "ready")
-        for bad in ("<html><body>no picture</body></html>", "<html><canvas></canvas>requestAnimationFrame"):
+        for bad in ("nothing", "G.run(1); G.win(1); {", "G.run(1); G.win(1); fetch('/x')", "G.run(1); G.win(1); </script>"):
             with self.assertRaises(courses.Problem):
                 play.clean(bad)
 

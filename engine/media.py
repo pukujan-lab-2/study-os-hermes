@@ -62,8 +62,15 @@ def listing(section_id: str) -> list[dict]:
     s = _section(section_id)
     out = []
     for m in rows("select * from media where section_id = ?", section_id):
-        out.append({"kind": m["kind"], "status": m["status"], "error": m["error"], "data": loads(m["data"], None) if m["status"] == "ready" else None, "stale": m["made_from"] != _stamp(s["body"]), "export": {"status": m["export_status"], "error": m["export_error"], "file": m["export_file"]}})
+        out.append({"kind": m["kind"], "status": m["status"], "error": m["error"], "data": _shown(m) if m["status"] == "ready" else None, "stale": m["made_from"] != _stamp(s["body"]), "export": {"status": m["export_status"], "error": m["export_error"], "file": m["export_file"]}})
     return out
+
+
+def _shown(m: dict):
+    d = loads(m["data"], None)
+    if m["kind"] == "play" and d:
+        return {"title": d["title"], "html": play.page(d["js"])} if d.get("js") else None
+    return d
 
 
 def make(section_id: str, kind: str) -> None:
@@ -100,7 +107,7 @@ def fix_game(section_id: str, error: str) -> None:
 
     def work():
         try:
-            run("update media set status = 'ready', data = ? where id = ?", json.dumps({**d, "html": play.fix(d["html"], error), "fixed": True}), m["id"])
+            run("update media set status = 'ready', data = ? where id = ?", json.dumps({**d, "js": play.fix(d["js"], error), "fixed": True}), m["id"])
         except Exception as err:  # noqa: BLE001
             run("update media set status = 'failed', error = ? where id = ?", str(err)[:300], m["id"])
         _changed(course)
