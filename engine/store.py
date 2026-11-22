@@ -49,6 +49,11 @@ create table if not exists explanations (
   id text primary key, section_id text not null references sections(id) on delete cascade, text text not null,
   score real not null, feedback text not null, authorship text, created_at text not null
 );
+create table if not exists media (
+  id text primary key, section_id text not null references sections(id) on delete cascade, kind text not null,
+  status text not null, data text, error text, made_from text, export_status text, export_error text, export_file text, created_at text not null,
+  unique (section_id, kind)
+);
 create table if not exists uploads (id text primary key, name text not null, text text not null, read_by text not null, created_at text not null);
 create table if not exists prefs (key text primary key, value text not null);
 """

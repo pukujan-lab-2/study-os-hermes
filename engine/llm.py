@@ -31,6 +31,9 @@ def _get():
 
 def _explain(err: Exception) -> str:
     t = str(err)
+    if "not_free" in t or "free tier" in t:
+        other = re.search(r"alternates'?\"?:\s*\[['\"]([^'\"]+)", t)
+        return f"The model Hermes is set to isn't available on your plan. Run `hermes portal` to sign in, or `hermes model` to pick {other.group(1) if other else 'another one'}."
     if "rate" in t.lower() or "429" in t:
         return "Your Hermes model is rate limited right now. Wait a minute and try again."
     if "credential" in t.lower() or "401" in t or "auth" in t.lower():

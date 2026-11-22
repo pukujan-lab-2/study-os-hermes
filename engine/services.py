@@ -3,7 +3,6 @@ Modal speaks. Without a key, the plugin works on this computer alone. Keys are o
 
 from __future__ import annotations
 
-import base64
 import io
 import json
 import os
@@ -125,20 +124,27 @@ def pangram(text: str) -> dict:
     return {"label": t.get("prediction_short") or ("Human" if human >= 0.5 else "AI"), "ai": round(ai, 3), "assisted": round(assisted, 3), "human": round(human, 3)}
 
 
-# ---- Modal: a voice on your own account (voice/modal_speech.py) ------------------------------------------------------
+# ---- Modal: a voice and an ear on your own account (voice/modal_speech.py) -------------------------------------
 
-def speak(text: str) -> dict:
-    """{audio: base64 WAV}, or {local: True} for the page to use this computer's own voice."""
-    if not status()["modal"]:
-        return {"local": True}
-    url = _safe(setting("modal_url"))
-    raw, h = _http("POST", f"{url}/tts", headers={"Authorization": f"Bearer {secret('MODAL_SPEECH_TOKEN')}", "Content-Type": "application/json"}, body=json.dumps({"text": text[:3800], "voice": setting("voice", "af_heart")}).encode(), timeout=180)
-    if not raw[:4] == b"RIFF":  # 16-bit mono PCM
-        buf = io.BytesIO()
-        with wave.open(buf, "wb") as w:
-            w.setnchannels(1)
-            w.setsampwidth(2)
-            w.setframerate(int(h.get("x-sample-rate", 24000)))
-            w.writeframes(raw[: len(raw) // 2 * 2])
-        raw = buf.getvalue()
-    return {"audio": base64.b64encode(raw).decode(), "mime": "audio/wav"}
+def _modal() -> tuple[str, dict]:
+    return _safe(setting("modal_url")), {"Authorization": f"Bearer {secret('MODAL_SPEECH_TOKEN')}"}
+
+
+def modal_tts(text: str, voice: str) -> bytes:
+    url, auth = _modal()
+    raw, h = _http("POST", f"{url}/tts", headers={**auth, "Content-Type": "application/json"}, body=json.dumps({"text": text, "voice": voice}).encode(), timeout=180)
+    if raw[:4] == b"RIFF":
+        return raw
+    buf = io.BytesIO()  # 16-bit mono PCM
+    with wave.open(buf, "wb") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(int(h.get("x-sample-rate", 24000)))
+        w.writeframes(raw[: len(raw) // 2 * 2])
+    return buf.getvalue()
+
+
+def modal_stt(wav: bytes) -> str:
+    url, auth = _modal()
+    raw, _ = _http("POST", f"{url}/stt?lang=en", headers={**auth, "Content-Type": "audio/wav"}, body=wav, timeout=120)
+    return str(json.loads(raw).get("text") or "").strip()

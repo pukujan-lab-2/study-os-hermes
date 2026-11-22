@@ -19,11 +19,11 @@ def _engine():
         mod = importlib.util.module_from_spec(spec)
         sys.modules[NAME] = mod
         spec.loader.exec_module(mod)
-    return {n: importlib.import_module(f"{NAME}.{n}") for n in ("courses", "ingest", "llm", "quiz", "services", "store", "prompts")}
+    return {n: importlib.import_module(f"{NAME}.{n}") for n in ("courses", "ingest", "llm", "quiz", "services", "store", "prompts", "media", "tutor", "voice", "essay")}
 
 
 _m = _engine()
-courses, ingest, llm, quiz, services, store, prompts = (_m[n] for n in ("courses", "ingest", "llm", "quiz", "services", "store", "prompts"))
+courses, ingest, llm, quiz, services, store, prompts, media, tutor, voice, essay = _m.values()
 router = APIRouter()
 
 
@@ -171,9 +171,75 @@ async def progress():
     return await call(quiz.progress)
 
 
+class Speak(BaseModel):
+    text: str = Field(max_length=8000)
+    who: str = "a"
+
+
+class Make(BaseModel):
+    kind: str
+    render: bool = False
+
+
+class Turn(BaseModel):
+    text: str = Field("", max_length=2000)
+    history: list[dict] = Field([], max_length=60)
+
+
+class Draft(BaseModel):
+    text: str = Field(max_length=24_000)
+    task: str = Field("", max_length=800)
+
+
 @router.post("/speak")
-async def speak(body: Text):
-    return await call(services.speak, body.text)
+async def speak(body: Speak):
+    return await call(voice.speak, body.text, body.who)
+
+
+@router.get("/sections/{section_id}/media")
+async def media_list(section_id: str):
+    return {"media": await call(media.listing, section_id), "can": media.export_ready()}
+
+
+@router.post("/sections/{section_id}/media")
+async def media_make(section_id: str, body: Make):
+    await call(media.make, section_id, body.kind)
+    return {"ok": True}
+
+
+@router.get("/sections/{section_id}/film/{kind}")
+async def film(section_id: str, kind: str):
+    return await call(media.film_html, section_id, kind)
+
+
+@router.post("/sections/{section_id}/export")
+async def export(section_id: str, body: Make):
+    return await call(media.export, section_id, body.kind, body.render)
+
+
+@router.get("/sections/{section_id}/ear-quiz")
+async def ear_quiz(section_id: str):
+    return await call(media.ear_quiz, section_id)
+
+
+@router.post("/sections/{section_id}/talk")
+async def talk(section_id: str, body: Turn):
+    return await call(tutor.turn, section_id, body.text, body.history)
+
+
+@router.post("/hear")
+async def hear(file: UploadFile = File(...)):
+    return {"text": await call(voice.hear, await file.read(20_000_000))}
+
+
+@router.post("/essay")
+async def essay_check(body: Draft):
+    return await call(essay.check, body.text, body.task)
+
+
+@router.post("/essay/ab")
+async def essay_ab(body: Draft):
+    return await call(essay.ab, body.text, body.task)
 
 
 @router.post("/prefs")

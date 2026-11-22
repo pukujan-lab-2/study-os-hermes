@@ -15,7 +15,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from engine import courses, ingest, llm, mastery, quiz, services, store  # noqa: E402
+from engine import courses, essay, film, ingest, llm, mastery, media, quiz, services, store, tutor, voice  # noqa: E402
 
 QUIZ = {
     "objectives": [
@@ -32,6 +32,18 @@ QUIZ = {
     "terms": [{"term": "Osmosis", "definition": "Water moving."}],
     "visual": {"kind": "flow", "title": "Steps", "items": [{"label": "One"}, {"label": "Two", "points": ["a"]}]},
 }
+
+
+def make_wav(seconds):
+    import wave
+
+    buf = io.BytesIO()
+    with wave.open(buf, "wb") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(8000)
+        w.writeframes(b"\0\0" * int(8000 * seconds))
+    return buf.getvalue()
 
 
 class FakeModel:
@@ -54,6 +66,14 @@ class FakeModel:
             out = {"title": "Osmosis", "subject": "Biology", "summary": "Explain it.", "sections": [{"number": i + 1, "title": f"Part {i + 1}", "goal": "Explain", "skip": parts > 2 and i == 0} for i in range(parts or 3)]}
         elif "objectives" in req:
             out = QUIZ
+        elif "turns" in req:
+            out = {"title": "Talk", "turns": [{"who": "a", "text": "Why does water move?"}, {"who": "b", "text": "Gravity?"}, {"who": "a", "text": "Not here."}]}
+        elif "scenes" in req:
+            out = {"title": "Film <b>", "scenes": [{"kind": "title", "heading": "Osmosis & you", "say": "Water moves.", "items": [{"label": "A short film"}]}, {"kind": "steps", "heading": "How", "say": "First this then that.", "items": [{"label": "One", "note": "a"}, {"label": "Two"}]}, {"kind": "compare", "heading": "Empty one", "say": "Nothing to compare here."}, {"kind": "question", "heading": "Why?", "say": "Think about it."}]}
+        elif req == ["say"]:
+            out = {"say": "What do you think moves?", "quiz": False, "visual": QUIZ["visual"]}
+        elif "strong" in req:
+            out = {"summary": "s", "strong": ["a"], "improve": [{"where": "w", "why": "y"}], "questions": ["q"]}
         else:
             out = {"goals": [{"number": 1, "score": 0.9}, {"number": 2, "score": 0}], "got": ["the idea"], "missing": ["why"], "next_question": "Why?"}
         return SimpleNamespace(parsed=None, text="Sure!\n```json\n" + json.dumps(out) + "\n```")
@@ -63,12 +83,16 @@ class Case(unittest.TestCase):
     def setUp(self):
         self.dir = tempfile.TemporaryDirectory()
         os.environ["STUDYOS_SOLO_DB"] = os.path.join(self.dir.name, "t.db")
+        os.environ["STUDYOS_SOLO_DATA"] = self.dir.name
+        self._computer = voice.computer
+        voice.computer = lambda text, who: make_wav(len(text.split()) / 2.5)
         for k in ("REDUCTO_API_KEY", "PANGRAM_API_KEY", "MODAL_SPEECH_TOKEN"):
             os.environ.pop(k, None)
         self.model = FakeModel()
         llm.use(self.model)
 
     def tearDown(self):
+        voice.computer = self._computer
         time.sleep(0.05)
         self.dir.cleanup()
 
@@ -292,14 +316,15 @@ class Services(Case):
         import base64
         import wave
 
-        a = services.speak("Hello")
+        a = voice.speak("Hello")
         with wave.open(io.BytesIO(base64.b64decode(a["audio"]))) as w:
             self.assertEqual((w.getframerate(), w.getnframes()), (24000, 2400))
 
     def test_without_keys_everything_stays_here(self):
         os.environ.pop("MODAL_SPEECH_TOKEN")
         os.environ.pop("REDUCTO_API_KEY")
-        self.assertEqual(services.speak("Hello"), {"local": True})
+        voice.computer = lambda *_: None
+        self.assertEqual(voice.speak("Hello there"), {"local": True})
         with self.assertRaises(courses.Problem):
             ingest.read("notes.pdf", b"%PDF-1.7 fake")
         self.assertEqual(self.seen, [])
@@ -309,6 +334,76 @@ class Services(Case):
             services._safe("http://example.com")
         with self.assertRaises(services.ServiceError):
             services._http("POST", f"http://127.0.0.1:{self.http.server_port}/redirect", headers={"Authorization": "Bearer rk"}, body=b"x")
+
+
+class Media(Case):
+    def ready(self, sid, kind):
+        media.make(sid, kind)
+        end = time.time() + 5
+        while time.time() < end:
+            m = next(x for x in media.listing(sid) if x["kind"] == kind)
+            if m["status"] != "making":
+                return m
+            time.sleep(0.02)
+        self.fail("still making")
+
+    def test_a_podcast_has_two_voices_and_knows_when_the_words_changed(self):
+        s = self.made()["list"][0]
+        m = self.ready(s["id"], "podcast")
+        self.assertEqual([t["who"] for t in m["data"]["turns"]], ["a", "b", "a"])
+        self.assertFalse(m["stale"])
+        store.run("update sections set body = 'new words' where id = ?", s["id"])
+        self.assertTrue(media.listing(s["id"])[0]["stale"])
+        self.assertEqual({t["who"] for t in self.ready(s["id"], "recap")["data"]["turns"]}, {"a"})
+
+    def test_a_film_is_one_safe_page_whose_scenes_fill_its_length(self):
+        s = self.made()["list"][0]
+        for kind, size in (("explainer", "1920"), ("short", "1080"), ("slides", "1920")):
+            self.assertEqual(self.ready(s["id"], kind)["status"], "ready")
+            f = media.film_html(s["id"], kind)
+            self.assertIn(f'data-width="{size}"', f["html"])
+            self.assertIn('data-composition-id="main"', f["html"])
+            self.assertNotIn("<b>Film", f["html"])
+            self.assertIn("Film &lt;b&gt;", f["html"])
+            self.assertNotIn("http", f["html"].replace("http-equiv", ""))
+            self.assertAlmostEqual(f["duration"], sum(x["duration"] for x in f["scenes"]), places=1)
+            self.assertEqual("cap clip" in f["html"], kind != "slides")
+        self.assertEqual([x["kind"] for x in media.clean_scenes([{"kind": "compare", "heading": "Nothing here at all", "say": "x"}], "short")], ["title"])
+
+    def test_a_video_exports_as_a_project_with_its_narration(self):
+        s = self.made()["list"][0]
+        self.ready(s["id"], "short")
+        d = media.project(s["id"], "short")
+        page = (d / "index.html").read_text()
+        self.assertEqual(page.count("<audio"), 4)
+        self.assertTrue((d / "voice" / "0.wav").exists())
+        self.assertNotIn("REDUCTO_API_KEY", media._env())
+
+    def test_the_ear_quiz_reads_the_right_answer(self):
+        s = self.made()["list"][0]
+        for x in media.ear_quiz(s["id"])["items"]:
+            self.assertIn("The answer is", x["answer"])
+            self.assertTrue("right" in x["answer"] or "osmosis" in x["answer"])
+
+    def test_talking(self):
+        s = self.made()["list"][0]
+        t = tutor.turn(s["id"], "", [])
+        self.assertEqual((t["say"], t["visual"]["kind"]), ("What do you think moves?", "flow"))
+        with self.assertRaises(services.ServiceError):
+            voice.hear(b"not a wav")
+
+    def test_an_essay_gets_feedback_and_a_shuffled_pair(self):
+        text = "Water moves through the thin skin of a cell. " * 10
+        r = essay.check(text, "Explain osmosis")
+        self.assertIsNone(r["authorship"])
+        self.assertIn("Pangram key", r["note"])
+        sides = essay.ab(text, "Explain osmosis")["sides"]
+        self.assertEqual(sorted(x["mine"] for x in sides), [False, True])
+        with self.assertRaises(courses.Problem):
+            essay.check("too short", "")
+
+    def test_a_model_the_plan_does_not_include_is_named(self):
+        self.assertIn("nous/welcome", llm._explain(Exception("Error code: 429 - {'message': \"This model isn't available on the free tier.\", 'reason': 'model_not_free', 'alternates': ['nous/welcome']}")))
 
 
 class Tools(Case):
@@ -321,7 +416,7 @@ class Tools(Case):
         pkg = types.ModuleType("solo")
         pkg.__path__ = [str(root)]
         sys.modules["solo"] = pkg
-        for n in ("engine", "engine.store", "engine.courses", "engine.quiz", "engine.llm", "engine.ingest", "engine.services"):
+        for n in ("engine", "engine.store", "engine.courses", "engine.quiz", "engine.llm", "engine.ingest", "engine.services", "engine.media", "engine.tutor", "engine.voice", "engine.essay", "engine.film"):
             sys.modules[f"solo.{n}"] = sys.modules[n]
         self.tools = importlib.import_module("solo.study_tools")
 

@@ -2,7 +2,7 @@
  * Study OS Solo, the Desktop page: courses, lessons, quizzes, review, explaining back, and what you know.
  * It only talks to this plugin's own routes (dashboard/plugin_api.py). Plain ESM, loaded uncompiled: no JSX.
  */
-import { PALETTE_AREA, ROUTES_AREA, SIDEBAR_NAV_AREA, host, haptic, useQuery, useQueryClient } from '@hermes/plugin-sdk'
+import { PALETTE_AREA, ROUTES_AREA, SIDEBAR_NAV_AREA, SandboxedFrame, host, haptic, useQuery, useQueryClient } from '@hermes/plugin-sdk'
 import { createElement, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 const ID = 'study-os-solo'
@@ -50,6 +50,13 @@ const PATHS = {
   trash: 'M5 7h14M10 7V4.500h4V7M7 7l1 13h8l1-13',
   chat: 'M4 5h16v11H9l-5 4z',
   bulb: 'M9.500 18h5M10 21h4M12 3a6 6 0 0 0-3.500 10.900c.6.500 1 1.200 1 2.100h5c0-.9.4-1.600 1-2.100A6 6 0 0 0 12 3z',
+  play: 'M8 5.500v13l10.500-6.500z',
+  pause: 'M8 5v14M16 5v14',
+  mic: 'M12 3a3 3 0 0 0-3 3v5a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3zM5.500 11a6.500 6.500 0 0 0 13 0M12 17.500V21',
+  bolt: 'M13 3L5 14h6l-1 7 8-11h-6z',
+  phone: 'M8 3h8a1.500 1.500 0 0 1 1.500 1.500v15A1.500 1.500 0 0 1 16 21H8a1.500 1.500 0 0 1-1.500-1.500v-15A1.500 1.500 0 0 1 8 3zM11 18h2',
+  slides: 'M3.500 5h17v11h-17zM12 16v4M8.500 20h7',
+  full: 'M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5',
   spin: 'M12 3a9 9 0 1 0 9 9'
 }
 const Icon = ({ n, size = 18, className }) =>
@@ -164,50 +171,6 @@ function Visual({ v }) {
     ? h('div.so-vcompare', items.map((x, i) => h('div.so-vcard', { key: i, style: { '--i': i } }, h('b', x.label), h('ul', x.points.map((p, k) => h('li', { key: k }, p))))))
     : h('div', { className: `so-v${v.kind}` }, items.map((x, i) => h('div.so-vstep', { key: i, style: { '--i': i } }, h('span.so-vdot', v.kind === 'parts' ? '' : i + 1), h('div', h('b', x.label), x.points.map((p, k) => h('span', { key: k }, p))))), v.kind === 'cycle' && h('div.so-vloop', h(Icon, { n: 'redo', size: 16 }), 'and round again'))
   return h('figure.so-visual', v.title && h('figcaption', v.title), body)
-}
-
-/* ---- reading aloud: Modal on your own account, or this computer's voice ---------------------------------- */
-
-function useVoice(ctx) {
-  const [state, setState] = useState('idle')
-  const audio = useRef(null)
-  const run = useRef(0)
-  const stop = useCallback(() => {
-    run.current++
-    if (audio.current) { audio.current.pause(); audio.current = null }
-    if (window.speechSynthesis) window.speechSynthesis.cancel()
-    setState('idle')
-  }, [])
-  useEffect(() => stop, [stop])
-  const play = async text => {
-    stop()
-    const mine = ++run.current
-    const parts = plainText(text).match(/[^.!?]+[.!?]*\s*/g) || []
-    const chunks = []
-    for (const p of parts) (chunks.length && (chunks[chunks.length - 1] + p).length < 600) ? (chunks[chunks.length - 1] += p) : chunks.push(p)
-    setState('loading')
-    for (const c of chunks) {
-      let r
-      try { r = await ctx.rest('/speak', { method: 'POST', body: { text: c }, timeoutMs: 180000 }) } catch (err) { if (mine === run.current) { host.notify({ kind: 'error', message: msg(err) }); r = { local: true } } }
-      if (mine !== run.current) return
-      setState('playing')
-      await new Promise(done => {
-        if (r && r.audio) {
-          const a = new Audio(`data:${r.mime};base64,${r.audio}`)
-          audio.current = a
-          a.onended = a.onerror = done
-          a.play().catch(done)
-        } else if (window.speechSynthesis) {
-          const u = new SpeechSynthesisUtterance(c)
-          u.onend = u.onerror = done
-          window.speechSynthesis.speak(u)
-        } else done()
-      })
-      if (mine !== run.current) return
-    }
-    setState('idle')
-  }
-  return { state, play, stop }
 }
 
 /* ---- quiz and review --------------------------------------------------------------------------------------- */
@@ -339,6 +302,422 @@ function Rewording({ ctx, section, meta, onClose, onChange }) {
       h('div.so-row.so-end', again && h(Btn, { onClick: () => setAgain(false) }, 'Back to the preview'), h(Btn, { kind: 'main', onClick: () => { setAgain(false); setView('new'); act({ action: 'preview', how }) } }, 'Preview'))))
 }
 
+/* ---- sound: one thing speaks at a time ------------------------------------------------------------------------ */
+
+const heard = new Map()
+function fetchVoice(ctx, text, who) {
+  const key = `${who}|${text}`
+  if (!heard.has(key)) {
+    if (heard.size > 60) heard.delete(heard.keys().next().value)
+    const p = ctx.rest('/speak', { method: 'POST', body: { text, who }, timeoutMs: 200000 }).catch(() => { heard.delete(key); return { local: true } })
+    heard.set(key, p)
+  }
+  return heard.get(key)
+}
+/** say(text, who) speaks one line and resolves when it ends (true) or was stopped (false). */
+function useSpeaker(ctx) {
+  const now = useRef(null)
+  const rate = useRef(1)
+  const level = useRef(0)
+  const stop = useCallback(() => {
+    const n = now.current
+    now.current = null
+    if (n) { if (n.audio) n.audio.pause(); if (window.speechSynthesis) window.speechSynthesis.cancel(); n.done(false) }
+  }, [])
+  useEffect(() => stop, [stop])
+  const say = useCallback(async (text, who = 'a', onStart) => {
+    stop()
+    const me = { done: () => {} }
+    now.current = me
+    const r = await fetchVoice(ctx, text, who)
+    if (now.current !== me) return false
+    return new Promise(resolve => {
+      me.done = ok => { if (now.current === me) now.current = null; resolve(ok) }
+      if (r && r.audio) {
+        const a = new Audio(`data:${r.mime};base64,${r.audio}`)
+        a.playbackRate = rate.current
+        me.audio = a
+        a.onplaying = () => onStart && onStart(a)
+        a.onended = () => me.done(true)
+        a.onerror = () => me.done(true)
+        a.play().catch(() => me.done(true))
+      } else if (window.speechSynthesis) {
+        const u = new SpeechSynthesisUtterance(text)
+        u.rate = rate.current
+        u.pitch = who === 'b' ? 0.82 : 1.05
+        u.onstart = () => onStart && onStart(null)
+        u.onend = u.onerror = () => me.done(true)
+        window.speechSynthesis.speak(u)
+      } else me.done(true)
+    })
+  }, [ctx, stop])
+  const setRate = x => { rate.current = x; if (now.current && now.current.audio) now.current.audio.playbackRate = x }
+  return { say, stop, setRate, rate, level, now }
+}
+
+/* ---- listen ----------------------------------------------------------------------------------------------------- */
+
+function TurnPlayer({ ctx, title, turns, labels }) {
+  const sp = useSpeaker(ctx)
+  const [at, setAt] = useState(0)
+  const [on, setOn] = useState(false)
+  const [rate, setRate] = useState(1)
+  const run = useRef(0)
+  const list = useRef(null)
+  const halt = () => { run.current++; sp.stop(); setOn(false) }
+  useEffect(() => () => { run.current++ }, [])
+  const play = async from => {
+    const mine = ++run.current
+    setOn(true)
+    for (let i = from; i < turns.length; i++) {
+      setAt(i)
+      const el = list.current && list.current.children[i]
+      if (el) el.scrollIntoView({ block: 'nearest', behavior: reduced() ? 'auto' : 'smooth' })
+      if (turns[i + 1]) fetchVoice(ctx, turns[i + 1].text, turns[i + 1].who)
+      const ok = await sp.say(turns[i].text, turns[i].who)
+      if (mine !== run.current || !ok) return
+      if (turns[i].pause) await new Promise(r => setTimeout(r, turns[i].pause))
+      if (mine !== run.current) return
+    }
+    setOn(false); setAt(0)
+  }
+  const speeds = [1, 1.2, 1.5, 0.85]
+  return h('div.so-player.so-in',
+    h('div.so-row',
+      h('button.so-playbig', { type: 'button', 'aria-label': on ? 'Pause' : 'Play', onClick: () => (on ? halt() : play(at)) }, h(Icon, { n: on ? 'pause' : 'play', size: 24 })),
+      h('div.so-grow', h('b', title), h('div.so-wave', { 'aria-hidden': true, className: cls('so-wave', on && 'on') }, Array.from({ length: 28 }, (_, i) => h('i', { key: i, style: { '--i': i } })))),
+      h(IconBtn, { icon: 'back', label: 'Back one line', disabled: at === 0, onClick: () => { halt(); play(Math.max(0, at - 1)) } }),
+      h(IconBtn, { icon: 'next', label: 'Next line', disabled: at >= turns.length - 1, onClick: () => { halt(); play(at + 1) } }),
+      h(Btn, { 'aria-label': 'Speed', onClick: () => { const n = speeds[(speeds.indexOf(rate) + 1) % speeds.length]; setRate(n); sp.setRate(n) } }, `${rate}x`)),
+    h('div.so-turns', { ref: list }, turns.map((t, i) => h('button', { key: i, type: 'button', className: cls(i === at && 'on', t.who === 'b' && 'b', t.hide && i > at && 'hide'), onClick: () => { halt(); play(i) } }, h('span.so-who', (labels || { a: 'Host', b: 'Curious one' })[t.who]), t.hide && i > at ? 'Think first' : t.text))))
+}
+
+const LISTEN = [
+  ['podcast', 'Podcast', 'Two hosts talk it through', 'mic'],
+  ['recap', 'One-minute recap', 'The idea, an example, the line to keep', 'bolt'],
+  ['ear', 'Quiz in your ear', 'Hear a question, think, hear the answer', 'bulb'],
+  ['read', 'Read to me', 'The lesson, word for word', 'sound']
+]
+function useMedia(ctx, sid) {
+  return useQuery({ queryKey: [ID, 'media', sid], queryFn: () => ctx.rest(`/sections/${sid}/media`), refetchInterval: q => (q.state.data && q.state.data.media.some(m => m.status === 'making' || m.export.status === 'rendering') ? 2500 : false) })
+}
+function Making({ m, what, onMake }) {
+  if (m && m.status === 'making') return h('div.so-row.so-wait', h(Icon, { n: 'spin' }), h('span', `Writing ${what}. Usually under a minute.`))
+  return h('div.so-makebox',
+    m && m.error && h(Note, { bad: true }, m.error),
+    h(Btn, { kind: 'main', onClick: onMake }, m ? `Make ${what} again` : `Make ${what}`))
+}
+function Listen({ ctx, section }) {
+  const { data, refetch } = useMedia(ctx, section.id)
+  const [kind, setKind] = useState('podcast')
+  const [ear, setEar] = useState(null)
+  const [error, setError] = useState(null)
+  const m = data && data.media.find(x => x.kind === kind)
+  const make = async () => { setError(null); try { await ctx.rest(`/sections/${section.id}/media`, { method: 'POST', body: { kind } }); refetch() } catch (err) { setError(msg(err)) } }
+  useEffect(() => { if (kind === 'ear' && !ear) ctx.rest(`/sections/${section.id}/ear-quiz`).then(setEar).catch(err => setError(msg(err))) }, [kind])
+  const readTurns = useMemo(() => {
+    const out = []
+    for (const p of String(section.body).split(/\n{2,}/)) { const t = plainText(p); if (t) out.push({ who: 'a', text: t }) }
+    return out
+  }, [section.body])
+  return h('section.so-card.so-in',
+    h('h2', 'Listen'),
+    h('div.so-tiles', LISTEN.map(([k, t, d, i]) => h('button', { key: k, type: 'button', 'aria-pressed': kind === k, onClick: () => { setKind(k); setError(null) } }, h(Icon, { n: i, size: 22 }), h('b', t), h('span.so-dim', d)))),
+    error && h(Note, { bad: true }, error),
+    kind === 'read' && h(TurnPlayer, { key: 'read', ctx, title: section.title, turns: readTurns, labels: { a: '' } }),
+    kind === 'ear' && ear && h(TurnPlayer, { key: 'ear', ctx, title: `${ear.items.length} questions`, labels: { a: 'Question', b: 'Answer' }, turns: ear.items.flatMap(x => [{ who: 'a', text: x.ask, pause: 6000 }, { who: 'b', text: x.answer, pause: 1200, hide: true }]) }),
+    (kind === 'podcast' || kind === 'recap') && (m && m.status === 'ready' ? h('div', { key: kind }, m.stale && h(Note, 'Made from the older wording.', h('span.so-grow'), h(Btn, { icon: 'redo', onClick: make }, 'Make it again')), h(TurnPlayer, { ctx, title: m.data.title, turns: m.data.turns, labels: kind === 'recap' ? { a: '' } : undefined })) : data && h(Making, { m, what: kind === 'podcast' ? 'the podcast' : 'the recap', onMake: make })))
+}
+
+/* ---- watch: the HyperFrames composition itself, played live -------------------------------------------------------- */
+
+function Film({ ctx, sid, kind }) {
+  const { data: f, error } = useQuery({ queryKey: [ID, 'film', sid, kind], queryFn: () => ctx.rest(`/sections/${sid}/film/${kind}`), staleTime: Infinity })
+  const frame = useRef(null)
+  const box = useRef(null)
+  const sp = useSpeaker(ctx)
+  const [scale, setScale] = useState(0)
+  const [on, setOn] = useState(false)
+  const [at, setAt] = useState(0)
+  const [t, setT] = useState(0)
+  const time = useRef(0)
+  const run = useRef(0)
+  const slides = kind === 'slides'
+  const [narrate, setNarrate] = useState(false)
+  const draw = x => { time.current = x; const w = frame.current && frame.current.contentWindow; if (w) w.postMessage({ t: x }, '*') }
+  const starts = useMemo(() => { let s = 0; return f ? f.scenes.map(x => { const at = s; s += x.duration; return at }) : [] }, [f])
+  useEffect(() => {
+    if (!f) return
+    const fit = () => box.current && setScale(Math.min(box.current.clientWidth / f.width, (document.fullscreenElement === box.current ? window.innerHeight : Infinity) / f.height))
+    fit()
+    const ro = new ResizeObserver(fit)
+    ro.observe(box.current)
+    document.addEventListener('fullscreenchange', fit)
+    return () => { ro.disconnect(); document.removeEventListener('fullscreenchange', fit) }
+  }, [f])
+  useEffect(() => {
+    const ready = e => { if (frame.current && e.source === frame.current.contentWindow && e.data && e.data.film) draw(slides ? hold(0) : 0.9) }
+    window.addEventListener('message', ready)
+    return () => { window.removeEventListener('message', ready); run.current++ }
+  }, [f])
+  const hold = i => starts[i] + f.scenes[i].duration - 0.45
+  const halt = () => { run.current++; sp.stop(); setOn(false) }
+  const tick = (mine, from, to) => new Promise(done => {
+    let last = performance.now()
+    let x = from
+    const step = now => {
+      if (mine !== run.current) return done(false)
+      x += (now - last) / 1000
+      last = now
+      draw(Math.min(x, to))
+      setT(Math.min(x, to))
+      if (x >= to) return done(true)
+      requestAnimationFrame(step)
+    }
+    requestAnimationFrame(step)
+  })
+  const play = async i0 => {
+    const mine = ++run.current
+    setOn(true)
+    for (let i = i0; i < f.scenes.length; i++) {
+      setAt(i)
+      draw(starts[i])
+      if (f.scenes[i + 1]) fetchVoice(ctx, f.scenes[i + 1].say, 'a')
+      const s = f.scenes[i]
+      let started
+      const begun = new Promise(r => { started = r })
+      const spoken = sp.say(s.say, 'a', () => started())
+      await Promise.race([begun, spoken, new Promise(r => setTimeout(r, 20000))])
+      if (mine !== run.current) return
+      const ok = await tick(mine, starts[i], starts[i] + s.duration - (i === f.scenes.length - 1 ? 0.02 : 0))
+      if (!ok || mine !== run.current) return
+      await Promise.race([spoken, new Promise(r => setTimeout(r, 2500))])
+      if (mine !== run.current) return
+    }
+    setOn(false)
+  }
+  const slide = async i => {
+    halt()
+    const mine = ++run.current
+    setAt(i)
+    if (narrate) sp.say(f.scenes[i].say, 'a')
+    await tick(mine, starts[i], Math.min(hold(i), starts[i] + 3.2))
+    if (mine === run.current) draw(hold(i))
+  }
+  if (error) return h(Note, { bad: true }, msg(error))
+  if (!f) return h('div.so-skel')
+  return h('div.so-film', { className: cls('so-film', f.height > f.width && 'tall') },
+    h('div.so-stage', { ref: box, style: { aspectRatio: `${f.width}/${f.height}` }, tabIndex: 0, onKeyDown: e => { if (slides && e.key === 'ArrowRight' && at < f.scenes.length - 1) slide(at + 1); if (slides && e.key === 'ArrowLeft' && at > 0) slide(at - 1) } },
+      scale > 0 && h(SandboxedFrame, { ref: frame, title: f.title, src: `data:text/html;charset=utf-8,${encodeURIComponent(f.html)}`, style: { width: f.width, height: f.height, transform: `scale(${scale})`, transformOrigin: '0 0', border: 0, display: 'block', maxWidth: 'none', pointerEvents: 'none' } }),
+      !slides && !on && h('button.so-filmplay', { type: 'button', 'aria-label': 'Play', onClick: () => play(at >= f.scenes.length - 1 ? 0 : at) }, h(Icon, { n: 'play', size: 34 }))),
+    h('div.so-row.so-filmbar',
+      slides
+        ? [h(IconBtn, { key: 1, icon: 'back', label: 'Previous slide', disabled: at === 0, onClick: () => slide(at - 1) }), h('span.so-dim', { key: 2 }, `${at + 1} of ${f.scenes.length}`), h(IconBtn, { key: 3, icon: 'next', label: 'Next slide', disabled: at === f.scenes.length - 1, onClick: () => slide(at + 1) }), h(Btn, { key: 4, icon: 'sound', 'aria-pressed': narrate, onClick: () => { if (narrate) sp.stop(); else sp.say(f.scenes[at].say, 'a'); setNarrate(!narrate) } }, narrate ? 'Stop speaking' : 'Speak the notes')]
+        : [h(IconBtn, { key: 1, icon: on ? 'pause' : 'play', label: on ? 'Pause' : 'Play', onClick: () => (on ? halt() : play(at)) }), h('div.so-chapters', { key: 2 }, f.scenes.map((s, i) => h('button', { key: i, type: 'button', title: s.heading, 'aria-label': s.heading, style: { flex: s.duration }, onClick: () => { halt(); play(i) } }, h('i', { style: { width: `${Math.max(0, Math.min(1, (t - starts[i]) / s.duration)) * 100}%` } })))), h('span.so-dim', { key: 3 }, `${Math.floor(t / 60)}:${String(Math.floor(t % 60)).padStart(2, '0')} / ${Math.floor(f.duration / 60)}:${String(Math.floor(f.duration % 60)).padStart(2, '0')}`)],
+      h('span.so-grow'),
+      h(IconBtn, { icon: 'full', label: 'Full screen', onClick: () => box.current.requestFullscreen && box.current.requestFullscreen() })),
+    slides && h('p.so-notes', h('b', 'Notes: '), f.scenes[at].say))
+}
+const WATCH = [
+  ['explainer', 'Explainer', 'A narrated video, about 80 seconds', 'play'],
+  ['short', 'Short', 'Vertical, under 40 seconds', 'phone'],
+  ['slides', 'Slides', 'Click through, with notes', 'slides']
+]
+function Watch({ ctx, section }) {
+  const client = useQueryClient()
+  const { data, refetch } = useMedia(ctx, section.id)
+  const [kind, setKind] = useState('explainer')
+  const [error, setError] = useState(null)
+  const m = data && data.media.find(x => x.kind === kind)
+  const make = async () => { setError(null); try { await ctx.rest(`/sections/${section.id}/media`, { method: 'POST', body: { kind } }); client.removeQueries({ queryKey: [ID, 'film', section.id, kind] }); refetch() } catch (err) { setError(msg(err)) } }
+  const save = async render => {
+    setError(null)
+    try { const r = await ctx.rest(`/sections/${section.id}/export`, { method: 'POST', body: { kind, render }, timeoutMs: 120000 }); if (!render && ctx.os && ctx.os.revealPath) ctx.os.revealPath(r.folder); refetch() } catch (err) { setError(msg(err)) }
+  }
+  const label = (WATCH.find(w => w[0] === kind) || [])[1]
+  return h('section.so-card.so-in',
+    h('h2', 'Watch'),
+    h('div.so-tiles', WATCH.map(([k, t, d, i]) => h('button', { key: k, type: 'button', 'aria-pressed': kind === k, onClick: () => { setKind(k); setError(null) } }, h(Icon, { n: i, size: 22 }), h('b', t), h('span.so-dim', d)))),
+    error && h(Note, { bad: true }, error),
+    m && m.status === 'ready'
+      ? h('div', { key: kind },
+          m.stale && h(Note, 'Made from the older wording.', h('span.so-grow'), h(Btn, { icon: 'redo', onClick: make }, 'Make it again')),
+          h(Film, { key: `${section.id}${kind}${m.data.title}`, ctx, sid: section.id, kind }),
+          h('div.so-row.so-export',
+            h('span.so-dim.so-grow', m.export.status === 'rendering' ? 'Rendering with HyperFrames. A few minutes; you can leave.' : m.export.status === 'done' ? 'Rendered.' : 'A HyperFrames composition: save the project, or render an MP4 on this computer.'),
+            m.export.status === 'done' && ctx.os && ctx.os.revealPath && h(Btn, { icon: 'file', onClick: () => ctx.os.revealPath(m.export.file) }, 'Show the MP4'),
+            h(Btn, { onClick: () => save(false) }, 'Save project'),
+            h(Btn, { disabled: m.export.status === 'rendering' || !data.can.node || !data.can.ffmpeg, title: data.can.ffmpeg && data.can.node ? 'Uses npx hyperframes' : 'Needs Node 22 and FFmpeg on this computer', onClick: () => save(true) }, m.export.status === 'rendering' ? [h(Icon, { key: 1, n: 'spin', size: 16 }), 'Rendering'] : 'Render MP4'),
+            h(IconBtn, { icon: 'redo', label: 'Make it again', onClick: make })),
+          m.export.error && h(Note, { bad: true }, m.export.error))
+      : data && h(Making, { m, what: kind === 'slides' ? 'the slides' : `the ${label.toLowerCase()}`, onMake: make }))
+}
+
+/* ---- talk: speak, be heard, interrupt ---------------------------------------------------------------------------------- */
+
+function wavOf(chunks, from) {
+  const n = chunks.reduce((a, c) => a + c.length, 0)
+  const all = new Float32Array(n)
+  let o = 0
+  for (const c of chunks) { all.set(c, o); o += c.length }
+  const step = from / 16000
+  const len = Math.floor(n / step)
+  const buf = new DataView(new ArrayBuffer(44 + len * 2))
+  const text = (at, s) => [...s].forEach((c, i) => buf.setUint8(at + i, c.charCodeAt(0)))
+  text(0, 'RIFF'); buf.setUint32(4, 36 + len * 2, true); text(8, 'WAVEfmt '); buf.setUint32(16, 16, true); buf.setUint16(20, 1, true); buf.setUint16(22, 1, true); buf.setUint32(24, 16000, true); buf.setUint32(28, 32000, true); buf.setUint16(32, 2, true); buf.setUint16(34, 16, true); text(36, 'data'); buf.setUint32(40, len * 2, true)
+  for (let i = 0; i < len; i++) { const a = Math.floor(i * step); const b = Math.min(n, Math.floor((i + 1) * step)); let s = 0; for (let k = a; k < b; k++) s += all[k]; buf.setInt16(44 + i * 2, Math.max(-1, Math.min(1, s / Math.max(1, b - a))) * 32767, true) }
+  return new Uint8Array(buf.buffer)
+}
+/** Listens for speech: starts after 160 ms of voice, ends after 800 ms of quiet. */
+function openMic(onStart, onEnd, onLevel) {
+  let stream
+  let ac
+  let closed = false
+  const ready = (async () => {
+    stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } })
+    if (closed) return stream.getTracks().forEach(t => t.stop())
+    ac = new AudioContext()
+    const src = ac.createMediaStreamSource(stream)
+    const node = ac.createScriptProcessor(2048, 1, 1)
+    let floor = 0.006
+    let pre = []
+    let talk = null
+    let loud = 0
+    let quiet = 0
+    node.onaudioprocess = e => {
+      const x = new Float32Array(e.inputBuffer.getChannelData(0))
+      let s = 0
+      for (let i = 0; i < x.length; i++) s += x[i] * x[i]
+      const rms = Math.sqrt(s / x.length)
+      const ms = (x.length / ac.sampleRate) * 1000
+      onLevel(rms)
+      const voice = rms > Math.max(0.014, floor * 3.2)
+      if (!voice) floor = floor * 0.95 + rms * 0.05
+      if (!talk) {
+        pre.push(x)
+        if (pre.length > 8) pre.shift()
+        loud = voice ? loud + ms : 0
+        if (loud > 160) { talk = pre; pre = []; quiet = 0; onStart() }
+      } else {
+        talk.push(x)
+        quiet = voice ? 0 : quiet + ms
+        const long = (talk.length * x.length) / ac.sampleRate > 40
+        if (quiet > 800 || long) { const t = talk; talk = null; loud = 0; onEnd(wavOf(t, ac.sampleRate)) }
+      }
+    }
+    src.connect(node)
+    node.connect(ac.destination)
+  })()
+  return { ready, close() { closed = true; if (stream) stream.getTracks().forEach(t => t.stop()); if (ac) ac.close() } }
+}
+function Talk({ ctx, section, onChange }) {
+  const sp = useSpeaker(ctx)
+  const [log, setLog] = useState([])
+  const [state, setState] = useState('idle')
+  const [mic, setMic] = useState(false)
+  const [text, setText] = useState('')
+  const [visual, setVisual] = useState(null)
+  const [quiz, setQuiz] = useState(false)
+  const [error, setError] = useState(null)
+  const orb = useRef(null)
+  const turns = useRef([])
+  const run = useRef(0)
+  const open = useRef(null)
+  const end = useRef(null)
+  const add = t => { turns.current = [...turns.current, t]; setLog(turns.current) }
+  useEffect(() => { if (end.current) end.current.scrollIntoView({ block: 'nearest', behavior: 'smooth' }) }, [log, state])
+  useEffect(() => () => { run.current++; if (open.current) open.current.close() }, [])
+  const answer = async said => {
+    const mine = ++run.current
+    sp.stop()
+    setError(null)
+    const history = turns.current
+    if (said) add({ who: 'me', text: said })
+    setState('thinking')
+    try {
+      const r = await ctx.rest(`/sections/${section.id}/talk`, { method: 'POST', body: { text: said, history }, timeoutMs: 120000 })
+      if (mine !== run.current) return
+      add({ who: 'tutor', text: r.say })
+      if (r.visual) setVisual(r.visual)
+      if (r.quiz) setQuiz(true)
+      setState('speaking')
+      for (const part of r.say.match(/[^.!?]+[.!?]*\s*/g) || [r.say]) { if (!(await sp.say(part, 'a')) || mine !== run.current) return }
+      if (mine === run.current) setState('idle')
+    } catch (err) { if (mine === run.current) { setError(msg(err)); setState('idle') } }
+  }
+  const toggle = async () => {
+    if (open.current) { open.current.close(); open.current = null; setMic(false); return }
+    setError(null)
+    const m = openMic(
+      () => { run.current++; sp.stop(); setState('hearing') },
+      async wav => {
+        setState('thinking')
+        try {
+          const r = await ctx.rest('/hear', { method: 'POST', upload: { filename: 'talk.wav', contentType: 'audio/wav', bytes: wav }, timeoutMs: 120000 })
+          if (r.text.trim()) answer(r.text.trim()); else setState('idle')
+        } catch (err) { setError(msg(err)); setState('idle'); if (open.current) { open.current.close(); open.current = null; setMic(false) } }
+      },
+      l => { if (orb.current) orb.current.style.setProperty('--l', Math.min(1, l * 9).toFixed(3)) })
+    open.current = m
+    try { await m.ready; setMic(true); if (!turns.current.length) answer('') } catch (err) { open.current = null; setError('The microphone isn’t allowed. You can type instead, or allow Hermes in your system’s privacy settings.') }
+  }
+  const words = { idle: mic ? 'Listening. Just talk.' : turns.current.length ? 'Your turn' : 'Ready when you are', hearing: 'Hearing you', thinking: 'Thinking', speaking: mic ? 'Speaking. Talk over me any time.' : 'Speaking' }
+  return h('section.so-card.so-talk.so-in',
+    h('div.so-talktop',
+      h('button.so-orb', { ref: orb, type: 'button', className: cls('so-orb', state, mic && 'live'), 'aria-label': mic ? 'Stop the microphone' : 'Start talking', onClick: toggle }, h('i'), h('i'), h(Icon, { n: mic ? 'stop' : 'mic', size: 30 })),
+      h('div', { 'aria-live': 'polite' }, h('h2', words[state]), h('p.so-dim', mic ? 'Press the circle to stop the microphone.' : 'Press the circle to talk, or type below.'))),
+    error && h(Note, { bad: true }, error),
+    visual && h(Visual, { v: visual }),
+    log.length > 0 && h('div.so-log', log.map((t, i) => h('div', { key: i, className: cls('so-say', t.who) }, t.text)), state === 'thinking' && h('div.so-say.tutor.so-dots', h('i'), h('i'), h('i')), h('span', { ref: end })),
+    quiz && h(Quiz, { ctx, scope: { section_id: section.id }, title: 'Show me', onClose: () => setQuiz(false), onChange }),
+    h('form.so-row', { onSubmit: e => { e.preventDefault(); const t = text.trim(); if (t) { setText(''); answer(t) } } },
+      h('input.so-input.so-grow', { value: text, placeholder: 'Or type it', 'aria-label': 'Say something', maxLength: 1000, onChange: e => setText(e.target.value) }),
+      h(Btn, { kind: 'main', type: 'submit', disabled: !text.trim() || state === 'thinking' }, 'Send'),
+      !log.length && h(Btn, { onClick: () => answer('') }, 'You start'),
+      state === 'speaking' && h(Btn, { icon: 'stop', onClick: () => { run.current++; sp.stop(); setState('idle') } }, 'Quiet')))
+}
+
+/* ---- essay check --------------------------------------------------------------------------------------------------------- */
+
+const Reads = ({ v, note }) => v
+  ? h('div.so-reads', h('div.so-mix', { role: 'img', 'aria-label': `${pct(v.human)}% human, ${pct(v.assisted)}% assisted, ${pct(v.ai)}% AI` }, h('i.hu', { style: { flex: v.human } }), h('i.as', { style: { flex: v.assisted } }), h('i.ai', { style: { flex: v.ai } })), h('div.so-dim', h('b', `Reads as ${v.label}. `), `${pct(v.human)}% human-written, ${pct(v.assisted)}% assisted, ${pct(v.ai)}% AI, by Pangram`))
+  : h('p.so-dim', note)
+function Essay({ ctx, home }) {
+  const [text, setText] = useState('')
+  const [task, setTask] = useState('')
+  const [busy, setBusy] = useState(null)
+  const [r, setR] = useState(null)
+  const [pair, setPair] = useState(null)
+  const [guess, setGuess] = useState(null)
+  const [error, setError] = useState(null)
+  const go = async what => {
+    setBusy(what); setError(null)
+    try {
+      const out = await ctx.rest(what === 'ab' ? '/essay/ab' : '/essay', { method: 'POST', body: { text, task }, timeoutMs: 300000 })
+      if (what === 'ab') { setPair(out); setGuess(null) } else setR(out)
+    } catch (err) { setError(msg(err)) }
+    setBusy(null)
+  }
+  const n = text.trim() ? text.trim().split(/\s+/).length : 0
+  return h('div.so-page',
+    h('header.so-in', h('div.so-eyebrow', 'For essays and projects'), h('h1', 'Essay ', h('em', 'check')), h('p.so-lead', 'Feedback on a draft that never rewrites it, how it reads, and a blind test against what a model would write.')),
+    h('div.so-card.so-in',
+      h('label', h('span.so-label', 'The task (optional)'), h('input.so-input', { value: task, maxLength: 600, placeholder: 'Explain why bread rises, for a class report', onChange: e => setTask(e.target.value) })),
+      h('label.so-block', h('span.so-label', 'The draft'), h('textarea.so-input', { rows: 11, value: text, maxLength: 20000, placeholder: 'Paste at least 50 words', onChange: e => setText(e.target.value) })),
+      h('div.so-row.so-end', h('span.so-dim.so-grow', `${n} words`), h(Btn, { disabled: n < 50 || busy, onClick: () => go('ab') }, busy === 'ab' ? [h(Icon, { key: 1, n: 'spin', size: 16 }), 'Writing the other one'] : 'Blind A/B test'), h(Btn, { kind: 'main', disabled: n < 50 || busy, onClick: () => go('check') }, busy === 'check' ? [h(Icon, { key: 1, n: 'spin', size: 16 }), 'Reading it'] : 'Check it')),
+      error && h(Note, { bad: true }, error),
+      !home.services.pangram && h(Note, 'Feedback works now. To see whether a text reads as AI-written, add a Pangram key in Settings, Plugins, Study OS Solo.')),
+    r && h('section.so-card.so-in', h('h2', r.summary), h(Reads, { v: r.authorship, note: r.note }),
+      h('div.so-cols2', h('div', h('div.so-label', 'What works'), h('ul.so-ul', r.strong.map((x, i) => h('li', { key: i }, x)))), h('div', h('div.so-label', 'Think about'), h('ul.so-ul', r.improve.map((x, i) => h('li', { key: i }, h('b', `“${x.where}” `), x.why))))),
+      h('div.so-label', 'Only the writer could answer these'), h('ul.so-ul', r.questions.map((x, i) => h('li', { key: i }, x)))),
+    pair && h('section.so-card.so-in',
+      h('h2', guess === null ? 'One is the draft, one is a model’s. Which is the model’s?' : pair.sides[guess].mine ? 'That one was the draft' : 'Right, that’s the model'),
+      h('div.so-cols2', pair.sides.map((s, i) => h('div.so-abside', { key: i, className: cls('so-abside', guess !== null && (s.mine ? 'mine' : 'model')) },
+        h('div.so-row', h('span.so-optn', 'AB'[i]), guess !== null && h('b', s.mine ? 'The draft' : 'Written by a model'), h('span.so-grow'), guess === null && h(Btn, { onClick: () => setGuess(i) }, 'This is AI')),
+        h('p', s.text), guess !== null && h(Reads, { v: s.authorship, note: s.note })))),
+      guess !== null && h('p.so-dim', 'A detector can be wrong both ways. Use it to start a conversation, never to decide one.')))
+}
+
 /* ---- a course -------------------------------------------------------------------------------------------------------- */
 
 function Course({ ctx, id, home, go }) {
@@ -349,10 +728,10 @@ function Course({ ctx, id, home, go }) {
   const [sure, setSure] = useState(false)
   const top = useRef(null)
   const { data: c, error, refetch } = useQuery({ queryKey: [ID, 'course', id], queryFn: () => ctx.rest(`/courses/${id}`), refetchInterval: q => (q.state.data && ['planning', 'writing'].includes(q.state.data.status) ? 3000 : false) })
-  const voice = useVoice(ctx)
+  const [tab, setTab] = useState('learn')
   const s = c && c.list[at]
   useEffect(() => { if (s && s.body && !s.read) ctx.rest(`/courses/${id}?section=${s.id}`).then(() => client.invalidateQueries({ queryKey: [ID, 'home'] })).catch(() => {}) }, [s && s.id, s && !!s.body])
-  const open = i => { setAt(i); setQuiz(false); setReword(false); voice.stop(); top.current && top.current.scrollIntoView({ behavior: reduced() ? 'auto' : 'smooth', block: 'start' }) }
+  const open = i => { setAt(i); setQuiz(false); setReword(false); top.current && top.current.scrollIntoView({ behavior: reduced() ? 'auto' : 'smooth', block: 'start' }) }
   const changed = () => { refetch(); client.invalidateQueries({ queryKey: [ID, 'home'] }); client.invalidateQueries({ queryKey: [ID, 'progress'] }) }
   if (error && !c) return h('div.so-page', h(Note, { bad: true }, msg(error)), h(Btn, { onClick: () => go('home') }, 'Back to courses'))
   if (!c) return h('div.so-page', h('div.so-skel'))
@@ -376,13 +755,14 @@ function Course({ ctx, id, home, go }) {
           h('span.so-grow', x.title, h(Bar, { value: known })))
       })),
       s && h('div.so-main', { key: s.id },
-        quiz ? h(Quiz, { ctx, scope: { course_id: id, section_id: s.id }, title: s.title, onClose: () => { setQuiz(false); changed() }, onChange: changed })
+        s.body && !quiz && h('div.so-tabs', { role: 'tablist' }, [['learn', 'Learn', 'book'], ['watch', 'Watch', 'play'], ['listen', 'Listen', 'sound'], ['talk', 'Talk', 'mic']].map(([k, t, i]) => h('button', { key: k, type: 'button', role: 'tab', 'aria-selected': tab === k, onClick: () => { setTab(k); setReword(false) } }, h(Icon, { n: i, size: 16 }), t))),
+        s.body && !quiz && tab === 'watch' ? h(Watch, { key: `w${s.id}`, ctx, section: s }) : s.body && !quiz && tab === 'listen' ? h(Listen, { key: `l${s.id}`, ctx, section: s }) : s.body && !quiz && tab === 'talk' ? h(Talk, { key: `t${s.id}`, ctx, section: s, onChange: changed }) : quiz ? h(Quiz, { ctx, scope: { course_id: id, section_id: s.id }, title: s.title, onClose: () => { setQuiz(false); changed() }, onChange: changed })
           : h('div.so-in',
             h('article.so-card.so-lesson',
               h('div.so-eyebrow', `Section ${at + 1} of ${c.list.length}`),
               h('h2.so-title', s.title),
               s.goal && h('p.so-lead', s.goal),
-              s.body && h('div.so-row.so-tools', h(Btn, { icon: 'sliders', 'aria-expanded': reword, onClick: () => setReword(!reword) }, 'Change how it’s explained'), voice.state === 'idle' ? h(Btn, { icon: 'sound', onClick: () => voice.play(s.body) }, 'Read it to me') : h(Btn, { icon: voice.state === 'loading' ? 'spin' : 'stop', onClick: voice.stop }, voice.state === 'loading' ? 'Getting the voice' : 'Stop')),
+              s.body && h('div.so-row.so-tools', h(Btn, { icon: 'sliders', 'aria-expanded': reword, onClick: () => setReword(!reword) }, 'Change how it’s explained')),
               reword && h(Rewording, { ctx, section: s, meta: home, onClose: () => setReword(false), onChange: changed }),
               s.body ? h(Markdown, { text: s.body }) : s.error ? h(Note, { bad: true }, s.error) : h('div.so-writing', [92, 100, 84, 96, 70].map(w => h('i', { key: w, style: { width: `${w}%` } }))),
               s.body && s.visual && h(Visual, { v: s.visual }),
@@ -501,13 +881,14 @@ function Page({ ctx }) {
   if (error && !home) body = h('div.so-page', h('div.so-card.so-empty', h('h2', 'Study OS isn’t running yet'), h('p.so-dim', 'Turn on its agent half: run “hermes plugins enable study-os-solo”, then restart the gateway.'), h('p.so-dim', msg(error)), h(Btn, { kind: 'main', onClick: () => refetch() }, 'Try again')))
   else if (!home) body = h('div.so-page', h('div.so-skel'), h('div.so-skel'))
   else if (name === 'new') body = h(NewCourse, { ctx, home, go })
+  else if (name === 'essay') body = h(Essay, { ctx, home })
   else if (name === 'known') body = h(Known, { ctx, go })
   else if (name === 'review') body = h('div.so-page', h(Quiz, { ctx, scope: { due_only: true }, title: 'Review', onClose: () => { refetch(); go('home') }, onChange: () => client.invalidateQueries({ queryKey: [ID, 'progress'] }) }))
   else if (name === 'course') body = h(Course, { key: view.id, ctx, id: view.id, home, go })
   else body = h(Home, { home, go })
   return h('div.so-root',
     h('div.so-top', h('button.so-logo', { type: 'button', onClick: () => go('home') }, 'Study', h('em', 'OS')),
-      h('nav', { 'aria-label': 'Study OS' }, [['home', 'Courses'], ['known', 'What you know']].map(([k, t]) => h('button', { key: k, type: 'button', 'aria-current': name === k ? 'page' : undefined, onClick: () => go(k) }, t)), home && home.due > 0 && h('button', { type: 'button', 'aria-current': name === 'review' ? 'page' : undefined, onClick: () => go('review') }, 'Review', h('span.so-badge', home.due))),
+      h('nav', { 'aria-label': 'Study OS' }, [['home', 'Courses'], ['known', 'What you know'], ['essay', 'Essay check']].map(([k, t]) => h('button', { key: k, type: 'button', 'aria-current': name === k ? 'page' : undefined, onClick: () => go(k) }, t)), home && home.due > 0 && h('button', { type: 'button', 'aria-current': name === 'review' ? 'page' : undefined, onClick: () => go('review') }, 'Review', h('span.so-badge', home.due))),
       h('span.so-grow'), h(Btn, { icon: 'plus', onClick: () => go('new') }, 'New')),
     h('div.so-body', { key: `${name}:${view.id || ''}` }, body))
 }
@@ -574,10 +955,21 @@ const CSS = `
 .so-drop{display:flex;flex-direction:column;align-items:center;gap:12px;text-align:center;padding:38px;border:1.5px dashed var(--so-line);border-radius:20px;transition:border-color .2s,background .2s}.so-drop svg{color:var(--so-a)}.so-drop.over{border-color:var(--so-a);background:color-mix(in srgb,var(--so-a) 9%,transparent)}
 .so-link{font-size:17px!important;font-weight:650;letter-spacing:-.01em}.so-link:hover{color:var(--so-a)}.so-goals{display:flex;flex-wrap:wrap;gap:8px;margin-top:14px}.so-goal{display:inline-flex;gap:9px;align-items:center;padding:7px 13px;border-radius:99px;border:1px solid var(--so-line);font-size:13px}.so-goal i{width:13px;height:13px;flex:none;border-radius:99px;background:conic-gradient(var(--so-a) calc(var(--m)*1%),color-mix(in srgb,var(--so-ink) 14%,transparent) 0)}.so-goal.mastered i{background:var(--so-good)}.so-goal.new{color:var(--so-3)}.so-goal.due{border-color:var(--ui-orange,#f08a3c)}
 .so-in{animation:so-up .5s var(--so-ease) both;animation-delay:calc(var(--i,0)*45ms)}.so-spin{animation:so-turn 1s linear infinite}
+.so-tabs{display:flex;gap:4px;padding:5px;border:1px solid var(--so-line);border-radius:16px;align-self:flex-start;margin-bottom:16px;width:fit-content;max-width:100%;overflow-x:auto}.so-tabs button{display:flex;gap:7px;align-items:center;padding:8px 16px;border-radius:12px;font-size:13.5px;color:var(--so-2);transition:background .2s,color .2s}.so-tabs [aria-selected=true]{background:var(--so-ink);color:var(--ui-bg-editor,Canvas);font-weight:600}
+.so-tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin:16px 0 20px}.so-tiles button{display:flex;flex-direction:column;gap:5px;padding:15px;border:1px solid var(--so-line);border-radius:16px;transition:border-color .2s,background .2s,transform .2s var(--so-ease)}.so-tiles button:hover{border-color:var(--so-a);transform:translateY(-2px)}.so-tiles [aria-pressed=true]{background:color-mix(in srgb,var(--so-a) 15%,transparent);border-color:color-mix(in srgb,var(--so-a) 60%,transparent)}.so-tiles svg{color:var(--so-a)}
+.so-makebox{padding:26px 0 8px;display:flex;flex-direction:column;gap:12px;align-items:center}
+.so-playbig{display:grid;place-items:center;width:58px;height:58px;border-radius:99px;background:var(--so-a);color:var(--so-on);flex:none;transition:transform .2s var(--so-ease)}.so-playbig:hover{transform:scale(1.06)}
+.so-wave{display:flex;gap:3px;align-items:center;height:22px;margin-top:4px}.so-wave i{width:3px;height:5px;border-radius:9px;background:color-mix(in srgb,var(--so-a) 60%,transparent)}.so-wave.on i{animation:so-eq .9s ease-in-out infinite alternate;animation-delay:calc(var(--i)*-73ms)}@keyframes so-eq{from{height:4px}to{height:20px}}
+.so-turns{display:flex;flex-direction:column;gap:4px;margin-top:16px;max-height:380px;overflow:auto}.so-turns button{padding:11px 15px;border-radius:14px;color:var(--so-3);line-height:1.5;transition:background .25s,color .25s}.so-turns button:hover{color:var(--so-ink)}.so-turns .on{background:color-mix(in srgb,var(--so-a) 12%,transparent);color:var(--so-ink);font-size:15.5px}.so-turns .b.on{background:color-mix(in srgb,var(--ui-orange,#f08a3c) 14%,transparent)}.so-who{display:block;font-size:11px;color:var(--so-a);font-weight:600}.so-turns .b .so-who{color:var(--ui-orange,#f08a3c)}.so-who:empty{display:none}.so-turns .hide{font-style:italic}
+.so-stage{position:relative;width:100%;overflow:hidden;border-radius:20px;background:#000;outline-offset:3px}.so-film.tall .so-stage{max-width:330px;margin:0 auto}.so-stage:fullscreen{border-radius:0;display:grid;place-items:center;max-width:none}.so-filmplay{position:absolute;inset:0;display:flex;align-items:flex-start;justify-content:flex-end;padding:4%;color:#fff;width:100%}.so-filmplay svg{padding:18px;width:74px;height:74px;border-radius:99px;background:rgb(0 0 0/.45);backdrop-filter:blur(8px);transition:transform .2s var(--so-ease)}.so-filmplay:hover svg{transform:scale(1.08)}
+.so-filmbar{margin-top:10px;flex-wrap:nowrap!important}.so-chapters{display:flex;gap:3px;flex:6}.so-chapters button{height:22px;display:flex;align-items:center}.so-chapters button::before{content:'';display:none}.so-chapters button{position:relative}.so-chapters button::after{content:'';position:absolute;inset:8px 0;border-radius:9px;background:color-mix(in srgb,var(--so-ink) 14%,transparent)}.so-chapters i{position:absolute;z-index:1;left:0;top:8px;bottom:8px;border-radius:9px;background:var(--so-a)}.so-notes{margin-top:12px!important;padding:14px 18px;border-radius:14px;background:color-mix(in srgb,var(--so-ink) 5%,transparent)}.so-export{margin-top:18px;padding-top:16px;border-top:1px solid var(--so-line)}
+.so-talk{display:flex!important;flex-direction:column;gap:18px}.so-talktop{display:flex;gap:24px;align-items:center}.so-orb{position:relative;display:grid;place-items:center;width:118px;height:118px;border-radius:50%;flex:none;color:var(--so-on);background:radial-gradient(circle at 32% 28%,oklch(from var(--so-a) calc(l + .14) c h),var(--so-a) 55%,oklch(from var(--so-a) calc(l - .18) c calc(h + 40)));transition:transform .15s;transform:scale(calc(1 + var(--l,0)*.16))}.so-orb i{position:absolute;inset:0;border-radius:50%;border:2px solid var(--so-a);opacity:0}.so-orb.speaking i,.so-orb.hearing i{animation:so-ping 1.7s ease-out infinite}.so-orb i+i{animation-delay:.6s!important}.so-orb.hearing i{border-color:var(--so-good)}.so-orb.thinking{animation:so-breathe 1.3s ease-in-out infinite}@keyframes so-ping{from{opacity:.7;transform:scale(1)}to{opacity:0;transform:scale(1.55)}}@keyframes so-breathe{50%{transform:scale(.93)}}
+.so-log{display:flex;flex-direction:column;gap:9px;max-height:340px;overflow:auto;padding:4px}.so-say{max-width:82%;padding:11px 16px;border-radius:18px;line-height:1.5;animation:so-up .35s var(--so-ease) both}.so-say.tutor{align-self:flex-start;background:color-mix(in srgb,var(--so-ink) 7%,transparent);border-bottom-left-radius:5px}.so-say.me{align-self:flex-end;background:var(--so-a);color:var(--so-on);border-bottom-right-radius:5px}.so-dots{display:flex;gap:5px}.so-dots i{width:7px;height:7px;border-radius:9px;background:var(--so-3);animation:so-pulse 1s infinite}.so-dots i:nth-child(2){animation-delay:.2s}.so-dots i:nth-child(3){animation-delay:.4s}
+.so-block{display:block;margin-top:16px}.so-cols2{display:grid;grid-template-columns:1fr 1fr;gap:20px;margin:18px 0}.so-ul{padding-left:18px!important;list-style:disc}.so-ul li{margin-bottom:6px}.so-reads{margin-top:14px}.so-mix{display:flex;height:12px;border-radius:9px;overflow:hidden;gap:2px;margin-bottom:7px}.so-mix .hu{background:var(--so-good)}.so-mix .as{background:var(--ui-orange,#f08a3c)}.so-mix .ai{background:var(--so-bad)}.so-abside{padding:18px;border:1px solid var(--so-line);border-radius:18px;transition:border-color .3s}.so-abside.mine{border-color:var(--so-good)}.so-abside.model{border-color:var(--so-bad)}.so-abside p{white-space:pre-wrap;margin-top:12px;font-size:14px;line-height:1.6;max-height:330px;overflow:auto}
 @keyframes so-up{from{opacity:0;transform:translateY(10px)}}@keyframes so-pulse{50%{opacity:.45}}@keyframes so-turn{to{transform:rotate(1turn)}}
 @media (prefers-reduced-motion:reduce){.so-root *{animation:none!important;transition:none!important}}
-@container (max-width:780px){.so-two,.so-grid2,.so-how{grid-template-columns:minmax(0,1fr)}.so-rail{position:static;flex-direction:row;overflow-x:auto;padding-bottom:4px}.so-rail button{min-width:170px}.so-page{padding:24px 16px 60px}.so-top{padding:10px 16px;flex-wrap:wrap}.so-cover-big{width:84px}.so-empty{padding:26px}}
-@container (max-width:480px){.so-coursehead{align-items:flex-start}.so-feedback{flex-direction:column}.so-resume .so-ring{display:none}.so-top .so-grow,.so-top>.so-btn{display:none}}
+@container (max-width:780px){.so-cols2{grid-template-columns:1fr}.so-top nav{overflow-x:auto;max-width:100%}.so-top nav button{white-space:nowrap}.so-two,.so-grid2,.so-how{grid-template-columns:minmax(0,1fr)}.so-rail{position:static;flex-direction:row;overflow-x:auto;padding-bottom:4px}.so-rail button{min-width:170px}.so-page{padding:24px 16px 60px}.so-top{padding:10px 16px;flex-wrap:wrap}.so-cover-big{width:84px}.so-empty{padding:26px}}
+@container (max-width:480px){.so-export .so-grow{flex-basis:100%}.so-coursehead{align-items:flex-start}.so-feedback{flex-direction:column}.so-resume .so-ring{display:none}.so-top .so-grow,.so-top>.so-btn{display:none}}
 `
 
 export default {
