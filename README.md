@@ -52,6 +52,10 @@ Add these under **Settings → Plugins → Study OS Solo**. Each key is stored b
 
 Lessons made from a topic are written from what your model knows, with no sources. Check anything important.
 
+## Try it in a browser, or host it
+
+[hackathon.design-bakery.com](https://hackathon.design-bakery.com) runs the same engine and page with no sign-in. Each device gets its own database, known by a random cookie; a teacher opens a class with a code or QR and students join from their own devices. Spaces are deleted after three quiet days, and each device has a daily limit. To host your own, see `web/` (`server.py`, `docker-compose.yml`); keys stay in an env file on your server, and `web/try_devices.py` checks a running copy with several devices at once.
+
 ## How it's built
 
 `engine/` is plain Python and SQLite (no framework), `dashboard/plugin_api.py` are the routes Hermes mounts for the page, `desktop/plugin.js` is the page, and `study_tools.py` are the agent's tools. Tests use a pretend model and no network:
